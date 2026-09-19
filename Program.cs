@@ -38,6 +38,8 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.Use(async (context, next) =>
 {
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
     if (context.Request.Path.StartsWithSegments("/api"))
     {
         context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate, max-age=0";
@@ -51,6 +53,8 @@ if (OperatingSystem.IsWindows()) _ = Task.Run(async () => { await Task.Delay(700
 app.MapGet("/api/session", (HttpContext c) => { var s = Current(c); return Results.Ok(new { authenticated = s is not null, role = s?.Role }); });
 
 app.MapPost("/api/login", (HttpContext c, LoginRequest r) => {
+    if (string.IsNullOrWhiteSpace(r.Username) || string.IsNullOrWhiteSpace(r.Password))
+        return Results.Json(new { ok = false, message = "Invalid username or password." }, statusCode: 401);
     using var db = new Db(dbPath);
     var user = db.FindUser(r.Username);
     if (user is null || !PasswordHasher.Verify(r.Password, user.PasswordHash))
@@ -62,7 +66,17 @@ app.MapPost("/api/login", (HttpContext c, LoginRequest r) => {
 });
 app.MapPost("/api/logout", (HttpContext c) => { if (c.Request.Cookies.TryGetValue("clinic_session", out var token)) sessions.TryRemove(token, out _); c.Response.Cookies.Delete("clinic_session"); return Results.Ok(new{ok=true}); });
 
-Session? Current(HttpContext c) => c.Request.Cookies.TryGetValue("clinic_session", out var token) && sessions.TryGetValue(token, out var s) && s.Expires > DateTimeOffset.UtcNow ? s : null;
+Session? Current(HttpContext c)
+{
+    if (!c.Request.Cookies.TryGetValue("clinic_session", out var token) || !sessions.TryGetValue(token, out var session))
+        return null;
+    if (session.Expires <= DateTimeOffset.UtcNow)
+    {
+        sessions.TryRemove(token, out _);
+        return null;
+    }
+    return session;
+}
 bool Auth(HttpContext c) => Current(c) is not null;
 bool Admin(HttpContext c) => Auth(c) && Current(c)?.Role == "Admin";
 void InvalidateSessions(string username)
@@ -528,7 +542,7 @@ app.MapPost("/api/browse-folder", (HttpContext c) =>
 });
 app.MapPost("/api/clinic-logo", async (HttpContext c, IFormFile file) => {
     if (!Admin(c)) return Results.StatusCode(403);
-    if (file.Length == 0 || file.Length > 2 * 1024 * 1024) return Results.BadRequest(new { message = "Choose a logo smaller than 2 MB." });
+    if (file is null || file.Length == 0 || file.Length > 2 * 1024 * 1024) return Results.BadRequest(new { message = "Choose a logo smaller than 2 MB." });
     var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
     var types = new Dictionary<string, string> { [".png"]="image/png", [".jpg"]="image/jpeg", [".jpeg"]="image/jpeg", [".webp"]="image/webp", [".gif"]="image/gif" };
     if (!types.ContainsKey(ext)) return Results.BadRequest(new { message = "Use a PNG, JPG, WEBP, or GIF logo." });
@@ -594,14 +608,14 @@ app.MapPost("/api/backup", (HttpContext c) => {
     {
         return Results.BadRequest(new { message = "Backup could not be created: " + ex.Message });
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-        return Results.BadRequest(new { message = "Backup failed: " + ex.Message });
+        return Results.BadRequest(new { message = "Backup failed. Check that the destination folder is writable and try again." });
     }
 });
 app.MapPost("/api/restore", async (HttpContext c, IFormFile file) => {
     if (!Admin(c)) return Results.StatusCode(403);
-    if (file.Length == 0 || file.Length > MaxRestoreArchiveBytes)
+    if (file is null || file.Length == 0 || file.Length > MaxRestoreArchiveBytes)
         return Results.BadRequest(new { message = "Choose a backup ZIP smaller than 100 MB." });
     if (!string.Equals(Path.GetExtension(file.FileName), ".zip", StringComparison.OrdinalIgnoreCase))
         return Results.BadRequest(new { message = "Choose a Clinic Suite backup ZIP file." });
@@ -627,9 +641,9 @@ app.MapPost("/api/restore", async (HttpContext c, IFormFile file) => {
     {
         return Results.BadRequest(new { message = "The database could not be restored. Check that the backup is valid and the database folder is writable." });
     }
-    catch (Exception ex)
+    catch (Exception)
     {
-        return Results.BadRequest(new { message = "Restore failed: " + ex.Message });
+        return Results.BadRequest(new { message = "Restore failed. Check that the backup is valid and the database folder is writable." });
     }
     finally
     {
@@ -639,7 +653,7 @@ app.MapPost("/api/restore", async (HttpContext c, IFormFile file) => {
 
 app.MapPost("/api/documents/{patientId:int}/{visitId:int}", async (HttpContext c,int patientId,int visitId,IFormFile file) => {
     if(!Auth(c)) return Results.Unauthorized();
-    if(file.Length==0 || file.Length > 10 * 1024 * 1024)
+    if(file is null || file.Length==0 || file.Length > 10 * 1024 * 1024)
         return Results.BadRequest(new { message = "Choose a file smaller than 10 MB." });
     using var db=new Db(dbPath); var patient=db.GetPatient(patientId); if(patient is null || !db.VisitBelongsToPatient(visitId, patientId)) return Results.NotFound();
     var folder=Path.Combine(dataRoot,"Documents","Patients",db.GetPatientCode(patientId)); Directory.CreateDirectory(folder);
@@ -676,7 +690,7 @@ app.MapGet("/api/documents/{id:int}/download", (HttpContext c,int id) => {
 });
 app.MapPost("/api/patient-documents/{patientId:int}", async (HttpContext c, int patientId, IFormFile file) => {
     if (!Auth(c)) return Results.Unauthorized();
-    if (file.Length == 0 || file.Length > 10 * 1024 * 1024)
+    if (file is null || file.Length == 0 || file.Length > 10 * 1024 * 1024)
         return Results.BadRequest(new { message = "Choose a file smaller than 10 MB." });
 
     using var db = new Db(dbPath);

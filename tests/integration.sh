@@ -15,6 +15,7 @@ status(){ curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE" -c "$COOKIE" "$@"
 grepq(){ grep -q "$1" <<<"$2"; }
 session="$(curl -fsS "$base/api/session")"; grepq '"authenticated":false' "$session"
 login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$login"
+[[ "$(curl -sS -o /dev/null -w '%{http_code}' -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":null,"Password":"wrong"}' "$base/api/login")" == 401 ]]
 for attempt in {1..5}; do [[ "$(curl -sS -o /dev/null -w '%{http_code}' -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"wrong-password"}' "$base/api/login")" == 401 ]]; done
 retry_login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$retry_login"
 browse="$(curl -sS -X POST -b "$COOKIE" "$base/api/browse-folder")"; grepq 'Windows app' "$browse"

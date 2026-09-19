@@ -12,6 +12,9 @@ $root = Split-Path -Parent $PSScriptRoot
 $project = Join-Path $root "ClinicManagement.csproj"
 $payload = Join-Path $PSScriptRoot "Payload"
 $setup = Join-Path $PSScriptRoot "Setup.iss"
+$imageMagickVersion = "7.1.2-31"
+$imageMagickUrl = "https://github.com/ImageMagick/ImageMagick/releases/download/$imageMagickVersion/ImageMagick-$imageMagickVersion-Q16-x64-static.exe"
+$imageMagickSha256 = "765eeb01e4def9ab7dfb8e3989141a6a3fae578b34309cc72969768cb0d2e917"
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     throw "The .NET SDK is required. Install the .NET 8 SDK and run this script again."
@@ -58,6 +61,20 @@ if (-not (Test-Path $exe)) {
     throw "Publish completed but $exe was not created."
 }
 
+$imageMagickPath = Join-Path $payload "ImageMagickSetup.exe"
+Write-Host "Downloading pinned ImageMagick $imageMagickVersion..."
+Invoke-WebRequest `
+    -Uri $imageMagickUrl `
+    -OutFile $imageMagickPath `
+    -Headers @{ "User-Agent" = "ClinicSuite-Windows-Packaging" }
+
+$actualImageMagickSha256 = (Get-FileHash $imageMagickPath -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($actualImageMagickSha256 -ne $imageMagickSha256) {
+    Remove-Item $imageMagickPath -Force
+    throw "ImageMagick checksum verification failed. Expected $imageMagickSha256 but found $actualImageMagickSha256."
+}
+
+Write-Host "Verified ImageMagick installer checksum: $actualImageMagickSha256"
 Write-Host "Windows payload created at $payload"
 
 if ($BuildInstaller) {

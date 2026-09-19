@@ -37,6 +37,7 @@ Name: "{group}\Clinic Suite"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{commondesktop}\Clinic Suite"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
+Filename: "{app}\ImageMagickSetup.exe"; Parameters: "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR=""{app}\ImageMagick"""; StatusMsg: "Installing the bundled ImageMagick document converter..."; Flags: waituntilterminated runhidden; AfterInstall: VerifyImageMagick
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Clinic Suite"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 [Code]
@@ -126,6 +127,22 @@ begin
     MsgBox('The selected clinic data folder could not be created. Check the path and permissions.', mbError, MB_OK);
     Result := False;
   end;
+end;
+
+procedure VerifyImageMagick;
+var
+  InstallerPath, ExecutablePath, WorkingDir: String;
+  ResultCode: Integer;
+begin
+  InstallerPath := ExpandConstant('{app}\ImageMagickSetup.exe');
+  ExecutablePath := ExpandConstant('{app}\ImageMagick\magick.exe');
+  WorkingDir := ExpandConstant('{app}\ImageMagick');
+  if (not FileExists(ExecutablePath)) or
+     (not Exec(ExecutablePath, '-version', WorkingDir, SW_HIDE, ewWaitUntilTerminated, ResultCode)) or
+     (ResultCode <> 0) then
+    MsgBox('Clinic Suite was installed without its bundled ImageMagick component. Image-to-PDF conversion will not be available. Please reinstall using a complete installer package.', mbError, MB_OK)
+  else
+    DeleteFile(InstallerPath);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

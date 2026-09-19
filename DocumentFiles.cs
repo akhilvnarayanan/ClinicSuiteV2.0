@@ -13,6 +13,23 @@ static class DocumentFiles
 
     public static bool IsImage(string extension) => ImageExtensions.Contains(extension);
 
+    static string ImageMagickExecutable()
+    {
+        var packagedPath = Path.Combine(AppContext.BaseDirectory, "ImageMagick", "magick.exe");
+        if (File.Exists(packagedPath))
+            return packagedPath;
+
+        var configuredPath = Environment.GetEnvironmentVariable("CLINIC_IMAGEMAGICK_PATH");
+        if (!string.IsNullOrWhiteSpace(configuredPath) && File.Exists(configuredPath))
+            return Path.GetFullPath(configuredPath);
+
+        if (!OperatingSystem.IsWindows())
+            return "magick";
+
+        throw new InvalidOperationException(
+            "Image conversion is unavailable because the bundled ImageMagick component is missing. Reinstall Clinic Suite.");
+    }
+
     public static async Task SaveAsPdfAsync(IFormFile file, string outputPath)
     {
         var extension = Path.GetExtension(file.FileName);
@@ -35,7 +52,7 @@ static class DocumentFiles
 
             var startInfo = new ProcessStartInfo
             {
-                FileName = "magick",
+                FileName = ImageMagickExecutable(),
                 RedirectStandardError = true,
                 RedirectStandardOutput = true,
                 UseShellExecute = false,

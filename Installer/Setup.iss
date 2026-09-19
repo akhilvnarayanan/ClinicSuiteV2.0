@@ -69,7 +69,7 @@ begin
   if EndPos <= Length(Contents) then
   begin
     Value := Copy(Contents, StartPos, EndPos - StartPos);
-    StringChangeEx(Value, '\\', '\', True);
+    Value := StringChangeEx(Value, '\\', '\', True);
     Result := Value;
   end;
 end;
@@ -96,7 +96,7 @@ begin
   if PreviousDataDir <> '' then
     DataPage.Values[0] := PreviousDataDir
   else
-    DataPage.Values[0] := ExpandConstant('{commondocuments}\Clinic Suite Data');
+    DataPage.Values[0] := ExpandConstant('{commonappdata}\ClinicManagement\Data');
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -130,14 +130,16 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 var
-  ConfigDir, ConfigFile, S: String;
+  ConfigDir, ConfigFile, DataDir, S: String;
 begin
   if CurStep = ssPostInstall then
   begin
     ConfigDir := ExpandConstant('{commonappdata}\ClinicManagement');
     ForceDirectories(ConfigDir);
     ConfigFile := ConfigDir + '\config.json';
-    S := '{"DataPath":"' + StringChangeEx(DataPage.Values[0], '\', '\\', True) + '"}';
+    DataDir := DataPage.Values[0];
+    DataDir := StringChangeEx(DataDir, '\', '\\', True);
+    S := '{"DataPath":"' + DataDir + '"}';
     SaveStringToFile(ConfigFile, S, False);
   end;
 end;

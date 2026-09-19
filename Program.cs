@@ -35,6 +35,16 @@ using (var db = new Db(dbPath)) db.Initialize();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
+app.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        context.Response.Headers.CacheControl = "no-store, no-cache, must-revalidate, max-age=0";
+        context.Response.Headers.Pragma = "no-cache";
+        context.Response.Headers.Expires = "0";
+    }
+    await next();
+});
 if (OperatingSystem.IsWindows()) _ = Task.Run(async () => { await Task.Delay(700); try { Process.Start(new ProcessStartInfo { FileName = $"http://127.0.0.1:{configuredPort}", UseShellExecute = true }); } catch { } });
 
 app.MapGet("/api/session", (HttpContext c) => { var s = Current(c); return Results.Ok(new { authenticated = s is not null, role = s?.Role }); });

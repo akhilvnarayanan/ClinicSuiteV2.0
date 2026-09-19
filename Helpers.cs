@@ -263,7 +263,8 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
                                  p.PatientCode,p.Name,COALESCE(p.DateOfBirth,''),COALESCE(p.Gender,''),COALESCE(p.Phone,''),
                                  COALESCE((SELECT NULLIF(Method,'') FROM Payments WHERE VisitId=v.Id ORDER BY PaidAt DESC,Id DESC LIMIT 1),'Not recorded'),
                                  cs.ClinicName,COALESCE(cs.ClinicType,''),COALESCE(cs.Address,''),
-                                 COALESCE(cs.Phone,''),COALESCE(cs.Email,''),COALESCE(cs.LogoPath,'')
+                                  COALESCE(cs.Phone,''),COALESCE(cs.Email,''),COALESCE(cs.LogoPath,''),
+                                  COALESCE(v.ConsultationFee,0)
                           FROM Visits v
                           JOIN Patients p ON p.Id=v.PatientId
                           JOIN ClinicSettings cs ON cs.Id=1
@@ -272,6 +273,7 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         long invoiceId;
         string visitDate, patientCode, patientName, dateOfBirth, gender, phone, paymentMode;
         string clinicName, clinicType, clinicAddress, clinicPhone, clinicEmail, logoPath;
+        decimal consultationFee;
         using (var r = c.ExecuteReader())
         {
             if (!r.Read()) return null;
@@ -289,9 +291,22 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
             clinicPhone = r.GetString(11);
             clinicEmail = r.GetString(12);
             logoPath = r.GetString(13);
+            consultationFee = r.GetDecimal(14);
         }
 
         var services = new List<object>();
+        decimal total = consultationFee;
+        if (consultationFee > 0)
+        {
+            services.Add(new
+            {
+                service = "Consultation",
+                category = "Consultation",
+                rate = consultationFee,
+                quantity = 1,
+                amount = consultationFee
+            });
+        }
         using var serviceCommand = C.CreateCommand();
         serviceCommand.CommandText = @"SELECT vs.Description,CASE WHEN s.Id IS NULL THEN 'Custom service' ELSE 'Additional service' END,vs.Amount
                                        FROM VisitServices vs
@@ -300,7 +315,6 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
                                        ORDER BY vs.Id";
         serviceCommand.Parameters.AddWithValue("$v", visitId);
         using var serviceReader = serviceCommand.ExecuteReader();
-        decimal total = 0;
         while (serviceReader.Read())
         {
             var amount = serviceReader.GetDecimal(2);
@@ -313,6 +327,14 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
                 quantity = 1,
                 amount
             });
+        }
+
+        decimal paid;
+        using (var paymentCommand = C.CreateCommand())
+        {
+            paymentCommand.CommandText = "SELECT COALESCE(SUM(Amount),0) FROM Payments WHERE VisitId=$v";
+            paymentCommand.Parameters.AddWithValue("$v", visitId);
+            paid = Convert.ToDecimal(paymentCommand.ExecuteScalar() ?? 0);
         }
 
         return new
@@ -341,7 +363,9 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
                 phone
             },
             services,
-            total
+            total,
+            paid,
+            balance = total - paid
         };
     }
     public object AddVisitService(int id,VisitServiceRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO VisitServices(VisitId,ServiceId,Description,Amount) VALUES($v,$s,$d,$a);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$s",x.ServiceId??(object)DBNull.Value); c.Parameters.AddWithValue("$d",x.Description); c.Parameters.AddWithValue("$a",x.Amount); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id}; }

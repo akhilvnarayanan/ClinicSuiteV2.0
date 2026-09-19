@@ -14,6 +14,8 @@ var configuredHost = Environment.GetEnvironmentVariable("CLINIC_HOST") ?? "127.0
 builder.WebHost.UseUrls($"http://{configuredHost}:{configuredPort}");
 var app = builder.Build();
 var sessions = new ConcurrentDictionary<string, Session>();
+var loginAttempts = new ConcurrentDictionary<string, LoginAttempt>();
+var secureCookies = string.Equals(Environment.GetEnvironmentVariable("CLINIC_SECURE_COOKIES"), "true", StringComparison.OrdinalIgnoreCase);
 
 var defaultData = Environment.GetEnvironmentVariable("CLINIC_DATA_PATH") ?? builder.Configuration["ClinicManagement:DefaultDataPath"] ?? @"C:\ClinicManagementData";
 var configDir = Environment.GetEnvironmentVariable("CLINIC_CONFIG_PATH")
@@ -50,19 +52,54 @@ if (OperatingSystem.IsWindows()) _ = Task.Run(async () => { await Task.Delay(700
 app.MapGet("/api/session", (HttpContext c) => { var s = Current(c); return Results.Ok(new { authenticated = s is not null, role = s?.Role }); });
 
 app.MapPost("/api/login", (HttpContext c, LoginRequest r) => {
+    var attemptKey = $"{c.Connection.RemoteIpAddress?.ToString() ?? "unknown"}:{r.Username.Trim().ToLowerInvariant()}";
+    if (loginAttempts.TryGetValue(attemptKey, out var currentAttempt) && currentAttempt.BlockedUntil > DateTimeOffset.UtcNow)
+        return Results.Json(new { ok = false, message = "Too many failed attempts. Try again later." }, statusCode: 429);
     using var db = new Db(dbPath);
     var user = db.FindUser(r.Username);
-    if (user is null || !PasswordHasher.Verify(r.Password, user.PasswordHash)) return Results.Json(new { ok=false, message="Invalid username or password." }, statusCode:401);
+    if (user is null || !PasswordHasher.Verify(r.Password, user.PasswordHash))
+    {
+        var now = DateTimeOffset.UtcNow;
+        loginAttempts.AddOrUpdate(attemptKey,
+            _ => new LoginAttempt(1, now.AddMinutes(5)),
+            (_, previous) => new LoginAttempt(previous.Failures + 1, previous.Failures + 1 >= 5 ? now.AddMinutes(5) : previous.BlockedUntil));
+        return Results.Json(new { ok=false, message="Invalid username or password." }, statusCode:401);
+    }
+    loginAttempts.TryRemove(attemptKey, out _);
     var token = Guid.NewGuid().ToString("N");
-    sessions[token] = new Session(user.Username, user.Role, DateTimeOffset.UtcNow.AddHours(8));
-    c.Response.Cookies.Append("clinic_session", token, new CookieOptions{HttpOnly=true, SameSite=SameSiteMode.Strict, Secure=false, MaxAge=TimeSpan.FromHours(8)});
-    return Results.Ok(new {ok=true, role=user.Role});
+    var mustChangePassword = (user.Username.Equals("admin", StringComparison.OrdinalIgnoreCase) && PasswordHasher.Verify("Admin@123", user.PasswordHash))
+        || (user.Username.Equals("receptionist", StringComparison.OrdinalIgnoreCase) && PasswordHasher.Verify("Reception@123", user.PasswordHash));
+    sessions[token] = new Session(user.Username, user.Role, DateTimeOffset.UtcNow.AddHours(8), mustChangePassword);
+    c.Response.Cookies.Append("clinic_session", token, new CookieOptions{HttpOnly=true, SameSite=SameSiteMode.Strict, Secure=secureCookies || c.Request.IsHttps, MaxAge=TimeSpan.FromHours(8)});
+    return Results.Ok(new {ok=true, role=user.Role, mustChangePassword});
 });
 app.MapPost("/api/logout", (HttpContext c) => { if (c.Request.Cookies.TryGetValue("clinic_session", out var token)) sessions.TryRemove(token, out _); c.Response.Cookies.Delete("clinic_session"); return Results.Ok(new{ok=true}); });
 
 Session? Current(HttpContext c) => c.Request.Cookies.TryGetValue("clinic_session", out var token) && sessions.TryGetValue(token, out var s) && s.Expires > DateTimeOffset.UtcNow ? s : null;
-bool Auth(HttpContext c) => Current(c) is not null;
-bool Admin(HttpContext c) => Current(c)?.Role == "Admin";
+bool Auth(HttpContext c) => Current(c) is { MustChangePassword: false };
+bool Admin(HttpContext c) => Auth(c) && Current(c)?.Role == "Admin";
+void InvalidateSessions(string username)
+{
+    foreach (var pair in sessions)
+        if (string.Equals(pair.Value.Username, username, StringComparison.OrdinalIgnoreCase))
+            sessions.TryRemove(pair.Key, out _);
+}
+
+app.MapPost("/api/account/password", (HttpContext c, PasswordChangeRequest r) =>
+{
+    var session = Current(c);
+    if (session is null) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(r.CurrentPassword) || string.IsNullOrWhiteSpace(r.NewPassword) || r.NewPassword.Length < 8)
+        return Results.BadRequest(new { message = "Enter the current password and a new password of at least 8 characters." });
+    using var db = new Db(dbPath);
+    var user = db.FindUser(session.Username);
+    if (user is null || !PasswordHasher.Verify(r.CurrentPassword, user.PasswordHash))
+        return Results.BadRequest(new { message = "The current password is incorrect." });
+    db.UpdatePassword(session.Username, PasswordHasher.Hash(r.NewPassword));
+    InvalidateSessions(session.Username);
+    c.Response.Cookies.Delete("clinic_session");
+    return Results.Ok(new { ok = true, message = "Password changed. Sign in again with the new password." });
+});
 string BackupDestination(ClinicSettings s, bool manual) {
     var configured = manual ? s.ManualBackupPath : s.BackupPath;
     return string.IsNullOrWhiteSpace(configured)
@@ -191,6 +228,35 @@ void ValidateRestoreDatabase(string path)
             throw new InvalidDataException("The backup is not a compatible Clinic Suite database.");
     }
 
+    var requiredColumns = new Dictionary<string, string[]>
+    {
+        ["Users"] = new[] { "Id", "Username", "PasswordHash", "Role", "Active" },
+        ["Patients"] = new[] { "Id", "PatientCode", "Name", "CreatedAt" },
+        ["Visits"] = new[] { "Id", "PatientId", "VisitDate", "ConsultationFee" },
+        ["ClinicSettings"] = new[] { "Id", "ClinicName" },
+        ["DocumentTemplates"] = new[] { "Id", "PrescriptionHtml", "InvoiceHtml" }
+    };
+    foreach (var table in requiredColumns)
+    {
+        foreach (var column in table.Value)
+        {
+            using var columns = connection.CreateCommand();
+            columns.CommandText = "SELECT COUNT(*) FROM pragma_table_info($table) WHERE name=$column";
+            columns.Parameters.AddWithValue("$table", table.Key);
+            columns.Parameters.AddWithValue("$column", column);
+            if (Convert.ToInt32(columns.ExecuteScalar()) != 1)
+                throw new InvalidDataException($"The backup is missing the required {table.Key}.{column} field.");
+        }
+    }
+
+    using (var foreignKeys = connection.CreateCommand())
+    {
+        foreignKeys.CommandText = "PRAGMA foreign_key_check;";
+        using var rows = foreignKeys.ExecuteReader();
+        if (rows.Read())
+            throw new InvalidDataException("The backup contains invalid relational references.");
+    }
+
     using (var admin = connection.CreateCommand())
     {
         admin.CommandText = "SELECT COUNT(*) FROM Users WHERE Role='Admin' AND Active=1";
@@ -282,10 +348,21 @@ bool ScheduledDue(ClinicSettings s, DateTime now)
     if (now.Date == last.Date && s.BackupSchedule == "Daily") return false;
     if (s.BackupSchedule == "Weekly") {
         var day = Enum.TryParse<DayOfWeek>(s.BackupDay, true, out var parsed) ? parsed : DayOfWeek.Monday;
-        if (now.DayOfWeek != day || now.Date <= last.Date.AddDays(6)) return false;
+        var weeklyDue = now.Date > last.Date.AddDays(6);
+        if (!weeklyDue || (now.DayOfWeek != day && last != DateTime.MinValue && now.Date <= last.Date.AddDays(13))) return false;
     }
     return now.TimeOfDay >= at;
 }
+string DocumentContentType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+{
+    ".pdf" => "application/pdf",
+    ".jpg" or ".jpeg" => "image/jpeg",
+    ".png" => "image/png",
+    ".gif" => "image/gif",
+    ".webp" => "image/webp",
+    ".txt" => "text/plain",
+    _ => "application/octet-stream"
+};
 
 app.MapGet("/api/dashboard", (HttpContext c) => {
     if (!Auth(c)) return Results.Unauthorized();
@@ -319,7 +396,19 @@ app.MapGet("/api/visits/{id:int}/invoice", (HttpContext c,int id) => { if(!Auth(
 app.MapGet("/api/visits/{id:int}/prescription", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); var context=db.PrescriptionContext(id); return context is null?Results.NotFound():Results.Ok(context); });
 app.MapPost("/api/visits", (HttpContext c, VisitRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.PatientId<=0) return Results.BadRequest(new{message="Patient is required."}); using var db=new Db(dbPath); try{return Results.Ok(db.AddVisit(r));}catch(InvalidOperationException ex){return Results.BadRequest(new{message=ex.Message});}catch(SqliteException){return Results.BadRequest(new{message="Patient or doctor does not exist."});} });
 app.MapPost("/api/visits/{id:int}/services", (HttpContext c,int id, VisitServiceRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.Amount<0||string.IsNullOrWhiteSpace(r.Description)) return Results.BadRequest(new{message="Description and non-negative amount are required."}); using var db=new Db(dbPath); return db.Visit(id) is null?Results.NotFound():Results.Ok(db.AddVisitService(id,r)); });
-app.MapPost("/api/visits/{id:int}/payments", (HttpContext c,int id, PaymentRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.Amount<=0) return Results.BadRequest(new{message="Payment must be positive."}); using var db=new Db(dbPath); return db.Visit(id) is null?Results.NotFound():Results.Ok(db.AddPayment(id,r)); });
+ app.MapPost("/api/visits/{id:int}/payments", (HttpContext c,int id, PaymentRequest r) => {
+     if(!Auth(c)) return Results.Unauthorized();
+     if(r.Amount<=0) return Results.BadRequest(new{message="Payment must be positive."});
+     using var db=new Db(dbPath);
+     if (db.Visit(id) is null) return Results.NotFound();
+     try { return Results.Ok(db.AddPayment(id,r)); }
+     catch (InvalidOperationException ex) { return Results.BadRequest(new { message = ex.Message }); }
+ });
+app.MapGet("/api/visits/{id:int}/payments", (HttpContext c, int id) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    using var db = new Db(dbPath);
+    return db.Visit(id) is null ? Results.NotFound() : Results.Ok(db.PaymentHistoryForVisit(id));
+});
 app.MapGet("/api/patients/{id:int}/payments", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.PaymentHistory(id)); });
 app.MapGet("/api/doctors", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Doctors()); });
 app.MapGet("/api/doctors/available", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Doctors(true)); });
@@ -344,8 +433,8 @@ app.MapDelete("/api/doctors/{id:int}", (HttpContext c, int id) => {
     if (db.DoctorHasVisits(id)) return Results.Conflict(new { message = "This doctor is used in existing visits and cannot be deleted. Mark the doctor inactive instead." });
     return db.DeleteDoctor(id) ? Results.Ok(new { ok = true }) : Results.NotFound();
 });
-app.MapGet("/api/services", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Services()); });
-app.MapPost("/api/services", (HttpContext c, ServiceRequest r) => { if(!Admin(c)) return Results.StatusCode(403); using var db=new Db(dbPath); db.AddService(r); return Results.Ok(); });
+app.MapGet("/api/services", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Services(Admin(c) ? false : true)); });
+app.MapPost("/api/services", (HttpContext c, ServiceRequest r) => { if(!Admin(c)) return Results.StatusCode(403); if(string.IsNullOrWhiteSpace(r.Name)||r.Price<0) return Results.BadRequest(new{message="Service name and a non-negative price are required."}); using var db=new Db(dbPath); db.AddService(r); return Results.Ok(); });
 app.MapPut("/api/services/{id:int}", (HttpContext c, int id, ServiceRequest r) => {
     if (!Admin(c)) return Results.StatusCode(403);
     if (string.IsNullOrWhiteSpace(r.Name) || r.Price < 0) return Results.BadRequest(new { message = "Name and a non-negative price are required." });
@@ -461,8 +550,8 @@ app.MapGet("/api/clinic-logo/file", (HttpContext c) => {
 app.MapGet("/api/users", (HttpContext c) => { if(!Admin(c)) return Results.StatusCode(403); using var db=new Db(dbPath); return Results.Ok(db.Users()); });
 app.MapPost("/api/users", (HttpContext c, UserRequest r) => {
     if(!Admin(c)) return Results.StatusCode(403);
-    if(string.IsNullOrWhiteSpace(r.Username) || string.IsNullOrWhiteSpace(r.Password) || (r.Role != "Admin" && r.Role != "Receptionist"))
-        return Results.BadRequest(new { message = "Username, password and a valid role are required." });
+    if(string.IsNullOrWhiteSpace(r.Username) || string.IsNullOrWhiteSpace(r.Password) || r.Password.Length < 8 || (r.Role != "Admin" && r.Role != "Receptionist"))
+        return Results.BadRequest(new { message = "Username, a password of at least 8 characters, and a valid role are required." });
     using var db=new Db(dbPath);
     return db.AddUser(r) ? Results.Ok(new { ok = true }) : Results.Conflict(new { message = "Username already exists." });
 });
@@ -481,7 +570,9 @@ app.MapPut("/api/users/{id:int}", (HttpContext c, int id, UserUpdateRequest r) =
     if (existing.Role == "Admin" && existing.Active && (!r.Active || r.Role != "Admin") && db.ActiveAdminCount() <= 1)
         return Results.BadRequest(new { message = "At least one active administrator is required." });
     try {
-        return db.UpdateUser(id, r) ? Results.Ok(new { ok = true }) : Results.NotFound();
+        var updated = db.UpdateUser(id, r);
+        if (updated) InvalidateSessions(existing.Username);
+        return updated ? Results.Ok(new { ok = true }) : Results.NotFound();
     } catch (SqliteException ex) when (ex.SqliteErrorCode == 19) {
         return Results.Conflict(new { message = "Username already exists." });
     }
@@ -548,13 +639,17 @@ app.MapPost("/api/restore", async (HttpContext c, IFormFile file) => {
 });
 
 app.MapPost("/api/documents/{patientId:int}/{visitId:int}", async (HttpContext c,int patientId,int visitId,IFormFile file) => {
-    if(!Auth(c)) return Results.Unauthorized(); if(file.Length==0) return Results.BadRequest("Empty file");
+    if(!Auth(c)) return Results.Unauthorized();
+    if(file.Length==0 || file.Length > 10 * 1024 * 1024)
+        return Results.BadRequest(new { message = "Choose a file smaller than 10 MB." });
     using var db=new Db(dbPath); var patient=db.GetPatient(patientId); if(patient is null || !db.VisitBelongsToPatient(visitId, patientId)) return Results.NotFound();
     var folder=Path.Combine(dataRoot,"Documents","Patients",db.GetPatientCode(patientId)); Directory.CreateDirectory(folder);
-    var ext=Path.GetExtension(file.FileName); if(string.IsNullOrWhiteSpace(ext) || ext.Length>10 || ext.IndexOfAny(Path.GetInvalidFileNameChars())>=0) ext=".bin";
-    var path=Path.Combine(folder,$"{DateTime.Now:yyyy-MM-dd}_V{visitId}_Prescription{ext}");
+    var originalName = Path.GetFileName(file.FileName);
+    var ext=Path.GetExtension(originalName);
+    if(string.IsNullOrWhiteSpace(ext) || ext.Length>10 || ext.IndexOfAny(Path.GetInvalidFileNameChars())>=0) ext=".bin";
+    var path=Path.Combine(folder,$"{DateTime.Now:yyyy-MM-dd}_V{visitId}_Prescription_{Guid.NewGuid():N}{ext}");
     await using(var fs=File.Create(path)) await file.CopyToAsync(fs);
-    db.AddDocument(patientId,visitId,Path.GetRelativePath(dataRoot,path),file.FileName);
+    db.AddDocument(patientId,visitId,Path.GetRelativePath(dataRoot,path),originalName);
     return Results.Ok(new{path});
 });
 app.MapGet("/api/documents/{patientId:int}/{visitId:int}", (HttpContext c,int patientId,int visitId) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return !db.VisitBelongsToPatient(visitId,patientId)?Results.NotFound():Results.Ok(db.Documents(patientId,visitId)); });
@@ -566,7 +661,7 @@ app.MapGet("/api/documents/{id:int}/view", (HttpContext c,int id) => {
     var fullPath=Path.GetFullPath(Path.Combine(dataRoot,d.Value.Path));
     var safeRoot=Path.GetFullPath(dataRoot)+Path.DirectorySeparatorChar;
     return fullPath.StartsWith(safeRoot,StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath)
-        ? Results.File(fullPath,"application/pdf",enableRangeProcessing:true)
+        ? Results.File(fullPath, DocumentContentType(fullPath), enableRangeProcessing:true)
         : Results.NotFound();
 });
 app.MapGet("/api/documents/{id:int}/download", (HttpContext c,int id) => {
@@ -667,7 +762,9 @@ record UserUpdateRequest(string Username,string Role,bool Active,string? Passwor
 record ClinicSettings(string ClinicName,string? Address,string? Phone,string? Email,string? Website,string? RegistrationNo,string? TaxNo,string? Currency,string? LogoPath,string? Footer,string? ManualBackupPath = "",string? BackupPath = "",string? BackupSchedule = "Off",string? BackupTime = "02:00",string? BackupDay = "Monday",string? LastScheduledBackup = null,string? ClinicType = "");
 record TemplateSettings(string PrescriptionHtml,string InvoiceHtml);
 record InstallConfig(string? DataPath);
-record Session(string Username, string Role, DateTimeOffset Expires);
+record Session(string Username, string Role, DateTimeOffset Expires, bool MustChangePassword = false);
+record PasswordChangeRequest(string CurrentPassword, string NewPassword);
+record LoginAttempt(int Failures, DateTimeOffset BlockedUntil);
 record VisitRequest(int PatientId,int? DoctorId,string? VisitDate,string? VisitType,string? Notes,decimal ConsultationFee);
 record DoctorAvailabilityRequest(int DoctorId,bool Available);
 record VisitServiceRequest(int? ServiceId,string Description,decimal Amount);

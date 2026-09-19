@@ -14,7 +14,9 @@ request(){ curl -fsS -b "$COOKIE" -c "$COOKIE" "$@"; }
 status(){ curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE" -c "$COOKIE" "$@"; }
 grepq(){ grep -q "$1" <<<"$2"; }
 session="$(curl -fsS "$base/api/session")"; grepq '"authenticated":false' "$session"
-login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$login"
+login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$login"; grepq '"mustChangePassword":true' "$login"
+request -H 'Content-Type: application/json' -d '{"CurrentPassword":"Admin@123","NewPassword":"Admin@1234"}' "$base/api/account/password" >/dev/null
+login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@1234"}' "$base/api/login")"; grepq '"mustChangePassword":false' "$login"
 browse="$(curl -sS -X POST -b "$COOKIE" "$base/api/browse-folder")"; grepq 'Windows app' "$browse"
 p="$(request -H 'Content-Type: application/json' -d '{"Name":"Integration Patient","Phone":"555","BloodGroup":"O+","Allergies":"Penicillin","MedicalConditions":"Asthma"}' "$base/api/patients")"; grepq 'patientCode' "$p"; pid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$p")"
 list="$(request "$base/api/patients?q=Integration")"; grepq 'Integration Patient' "$list"; patient="$(request "$base/api/patients/$pid")"; grepq '"bloodGroup":"O+"' "$patient"; grepq '"allergies":"Penicillin"' "$patient"; grepq '"medicalConditions":"Asthma"' "$patient"; request "$base/api/patients/$pid/history" >/dev/null
@@ -22,15 +24,20 @@ updated="$(request -X PUT -H 'Content-Type: application/json' -d '{"Name":"Updat
 [[ "$(status -X PUT -H 'Content-Type: application/json' -d '{"Name":"Nobody"}' "$base/api/patients/99999")" == 404 ]]
 request -H 'Content-Type: application/json' -d '{"Name":"Integration Doctor","Specialization":"General","Phone":"555-0100","ConsultationFee":50}' "$base/api/doctors" >/dev/null
 doctor="$(request "$base/api/doctors")"; grepq '"name":"Integration Doctor"' "$doctor"; grepq '"phone":"555-0100"' "$doctor"; didoctor="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$doctor")"; request -X PUT -H 'Content-Type: application/json' -d '{"Name":"Updated Doctor","Specialization":"Family","Phone":"555-0200","ConsultationFee":60,"Active":false}' "$base/api/doctors/$didoctor" >/dev/null; doctor="$(request "$base/api/doctors")"; grepq '"name":"Updated Doctor"' "$doctor"; grepq '"specialization":"Family"' "$doctor"; grepq '"active":false' "$doctor"; [[ "$(status -X PUT -H 'Content-Type: application/json' -d '{"Name":"Nobody","Price":1}' "$base/api/doctors/99999")" == 404 ]]
+request -X PUT -H 'Content-Type: application/json' -d '{"Name":"Updated Doctor","Specialization":"Family","Phone":"555-0200","ConsultationFee":60,"Active":true}' "$base/api/doctors/$didoctor" >/dev/null
+request -H 'Content-Type: application/json' -d "{\"DoctorId\":$didoctor,\"Available\":true}" "$base/api/doctor-availability" >/dev/null
 request -H 'Content-Type: application/json' -d '{"Name":"Removable Doctor","ConsultationFee":25}' "$base/api/doctors" >/dev/null; removableid="$(sqlite3 "$DATA/data/clinic.db" "SELECT Id FROM Doctors WHERE Name='Removable Doctor';")"; request -X DELETE "$base/api/doctors/$removableid" >/dev/null; doctor="$(request "$base/api/doctors")"; ! grepq 'Removable Doctor' "$doctor"
 request -H 'Content-Type: application/json' -d '{"Name":"Integration Service","Price":25}' "$base/api/services" >/dev/null
-service="$(request "$base/api/services")"; diservice="$(sed -E 's/.*"Id":([0-9]+).*/\1/' <<<"$service")"; request -X PUT -H 'Content-Type: application/json' -d '{"Name":"Updated Service","Price":30,"Active":false}' "$base/api/services/$diservice" >/dev/null; service="$(request "$base/api/services")"; grepq '"Active":0' "$service"; [[ "$(status -X PUT -H 'Content-Type: application/json' -d '{"Name":"Nobody","Price":1}' "$base/api/services/99999")" == 404 ]]
+service="$(request "$base/api/services")"; diservice="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$service")"; request -X PUT -H 'Content-Type: application/json' -d '{"Name":"Updated Service","Price":30,"Active":false}' "$base/api/services/$diservice" >/dev/null; service="$(request "$base/api/services")"; grepq '"active":false' "$service"; [[ "$(status -X PUT -H 'Content-Type: application/json' -d '{"Name":"Nobody","Price":1}' "$base/api/services/99999")" == 404 ]]
 [[ "$(status -H 'Content-Type: application/json' -d '{"Name":"","ConsultationFee":-1}' "$base/api/patients")" == 400 ]]
 visit="$(request -H 'Content-Type: application/json' -d "{\"PatientId\":$pid,\"DoctorId\":$didoctor,\"VisitDate\":\"2025-01-01T10:00:00\",\"VisitType\":\"Follow-up\",\"Notes\":\"checkup\",\"ConsultationFee\":50}" "$base/api/visits")"; vid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$visit")"
+visit_detail="$(request "$base/api/visits/$vid")"; grepq '"visitDate":"2025-01-01T10:00:00"' "$visit_detail"
 [[ "$(status -X DELETE "$base/api/doctors/$didoctor")" == 409 ]]
 request -H 'Content-Type: application/json' -d '{"Description":"Lab test","Amount":25}' "$base/api/visits/$vid/services" >/dev/null
 request -H 'Content-Type: application/json' -d '{"Amount":30,"Method":"Cash"}' "$base/api/visits/$vid/payments" >/dev/null
+[[ "$(status -H 'Content-Type: application/json' -d '{"Amount":50,"Method":"Cash"}' "$base/api/visits/$vid/payments")" == 400 ]]
 payments="$(request "$base/api/patients/$pid/payments")"; grepq '"amountPaid":30' "$payments"; grepq '"service":"Lab test"' "$payments"; grepq '"paymentDate":' "$payments"
+visit_payments="$(request "$base/api/visits/$vid/payments")"; grepq '"amountPaid":30' "$visit_payments"
 visits="$(request "$base/api/visits")"; grepq '"total":75' "$visits"; grepq '"balance":45' "$visits"; grepq '"visitType":"Follow-up"' "$visits"; request "$base/api/visits/$vid" >/dev/null
 dashboard="$(request "$base/api/dashboard")"; grepq '"newPatientsThisMonth":' "$dashboard"; grepq '"recentVisits":' "$dashboard"; request "$base/api/reports/daily?date=2025-01-01" >/dev/null
 request -H 'Content-Type: application/json' -d '{"ClinicName":"Integration Clinic","Currency":"INR"}' "$base/api/settings" >/dev/null
@@ -58,13 +65,17 @@ mkdir -p "$DATA/extracted"; unzip -q "$backup" -d "$DATA/extracted"
 [[ "$(sqlite3 "$DATA/extracted/clinic.db" "SELECT COUNT(*) FROM Visits WHERE PatientId=$pid;")" == "1" ]]
 [[ "$(sqlite3 "$DATA/extracted/clinic.db" "SELECT COUNT(*) FROM Payments WHERE VisitId=$vid AND Amount=30;")" == "1" ]]
 [[ "$(find "$DATA/extracted" -mindepth 1 -type f -printf '%P\n' | sort)" == "clinic.db" ]]
+restored="$(curl -fsS -b "$COOKIE" -c "$COOKIE" -F "file=@$backup" "$base/api/restore")"; grepq 'Database restored successfully' "$restored"
+curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@1234"}' "$base/api/login" >/dev/null
 [[ "$(find "$custom_backup" -name '*.zip' -print -quit)" == "" ]]
 second="$(request -H 'Content-Type: application/json' -d '{"Username":"testuser","Password":"Test@123","Role":"Receptionist"}' "$base/api/users" 2>/dev/null || true)"
 [[ "$(status -H 'Content-Type: application/json' -d '{"Username":"testuser","Password":"Test@123","Role":"Receptionist"}' "$base/api/users")" == 409 ]]
 printf 'other patient' >"$DATA/other.txt"
 other="$(request -H 'Content-Type: application/json' -d '{"Name":"Other Patient"}' "$base/api/patients")"; otherid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$other")"
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE" -F "file=@$DATA/other.txt" "$base/api/documents/$otherid/$vid")" == 404 ]]
-curl -fsS -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"Username":"receptionist","Password":"Reception@123"}' "$base/api/login" >/dev/null
+reception_login="$(curl -fsS -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"Username":"receptionist","Password":"Reception@123"}' "$base/api/login")"; grepq '"mustChangePassword":true' "$reception_login"
+curl -fsS -b "$DATA/reception-cookie" -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"CurrentPassword":"Reception@123","NewPassword":"Reception@1234"}' "$base/api/account/password" >/dev/null
+curl -fsS -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"Username":"receptionist","Password":"Reception@1234"}' "$base/api/login" >/dev/null
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$DATA/reception-cookie" "$base/api/patients")" == 200 ]]
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$DATA/reception-cookie" "$base/api/clinic-profile")" == 200 ]]
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$DATA/reception-cookie" "$base/api/clinic-logo/file")" == 200 ]]

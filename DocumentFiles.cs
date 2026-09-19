@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ComponentModel;
 
 static class DocumentFiles
 {
@@ -44,14 +45,25 @@ static class DocumentFiles
             startInfo.ArgumentList.Add("-auto-orient");
             startInfo.ArgumentList.Add(outputPath);
 
-            using var process = Process.Start(startInfo)
-                ?? throw new InvalidOperationException("Image conversion is unavailable.");
+            Process process;
+            try
+            {
+                process = Process.Start(startInfo)
+                    ?? throw new InvalidOperationException("Image conversion is unavailable.");
+            }
+            catch (Win32Exception)
+            {
+                throw new InvalidOperationException("Image conversion is unavailable. Install ImageMagick and try again.");
+            }
+            using (process)
+            {
             var error = await process.StandardError.ReadToEndAsync();
             await process.WaitForExitAsync();
             if (process.ExitCode != 0 || !File.Exists(outputPath))
                 throw new InvalidDataException(string.IsNullOrWhiteSpace(error)
                     ? "The image could not be converted to PDF."
                     : "The image could not be converted to PDF: " + error.Trim());
+            }
         }
         finally
         {

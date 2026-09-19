@@ -1,0 +1,169 @@
+Perform a **complete technical audit of the entire project** before making any changes.
+
+Analyze the project end-to-end, including the frontend, backend, database, API routes, components, pages, services, templates, configuration, dependencies, assets, and supporting files.
+
+### 1. Find and fix issues
+
+* Identify broken functionality, broken links/routes, missing references, incorrect imports, runtime errors, console errors, and API/database issues.
+* Check that all frontend and backend connections are working correctly.
+* Check all CRUD operations and data relationships.
+* Identify calculation, validation, and data-handling issues.
+* Check for inconsistent behavior between different parts of the application.
+* Verify that existing features are actually connected to the correct backend/database functionality.
+
+### 2. Review recently modified functionality
+
+Pay particular attention to:
+
+* Patient management
+* Doctor management
+* Services and pricing
+* Payments and payment history
+* Service bills/invoices
+* Prescription generation
+* Invoice/prescription templates
+* Patient document upload/view/download
+* Reports and exports
+* Clinic settings
+* User management
+* Backup functionality
+* Any recently added or modified features
+
+Make sure the recent changes have not broken existing functionality.
+
+### 3. Remove unused code
+
+Identify and safely remove:
+
+* Unused components
+* Unused pages
+* Unused functions
+* Unused variables
+* Unused imports
+* Duplicate components or logic
+* Dead code
+* Obsolete API endpoints
+* Unused database queries
+* Unused CSS/styles
+* Unused assets
+* Temporary/debug/test code that is no longer required
+* Old implementations that have been replaced by newer functionality
+
+**Do not remove anything unless you have verified that it is genuinely unused.**
+
+### 4. Dependencies and configuration
+
+* Check `package.json` and all dependencies.
+* Identify unused or duplicate packages.
+* Check for outdated/redundant configuration.
+* Check environment variables and configuration files for unnecessary entries.
+* Do not upgrade dependencies unnecessarily if doing so could introduce compatibility issues.
+
+### 5. Database and data integrity
+
+* Review the database schema and relationships.
+* Check for unused tables, fields, indexes, or models.
+* Verify foreign-key relationships and patient/service/payment relationships.
+* Ensure deleting or modifying records does not create orphaned data.
+* Check that existing data will continue to work after any cleanup.
+* Do not delete database structures that may contain existing production data without verifying their usage first.
+
+### 6. Security and reliability
+
+Check for:
+
+* Improper authentication/authorization
+* Missing permission checks
+* Exposed sensitive information
+* Unsafe API endpoints
+* Improper input validation
+* SQL/database security issues
+* File upload security issues
+* Incorrect handling of passwords
+* Insecure document access
+* Client-side-only security checks
+* Error handling that exposes internal information
+
+Fix issues where appropriate without changing the intended application behavior.
+
+### 7. Performance
+
+Look for:
+
+* Unnecessary database queries
+* Duplicate API calls
+* Excessive component rendering
+* Large or unnecessary assets
+* Inefficient loops or calculations
+* Unnecessary data loading
+* Memory/resource leaks
+* Slow page operations
+
+Make practical optimizations only where they provide a real benefit.
+
+### 8. GUI consistency
+
+Review the entire application for:
+
+* Incorrect spacing
+* Misaligned fields/cards
+* Inconsistent button styles
+* Inconsistent typography
+* Responsive layout problems
+* Incorrect labels
+* Duplicate UI elements
+* Missing loading/error/empty states
+
+**Do not redesign the application or make unnecessary GUI changes.** Preserve the current design and functionality unless a UI issue is clearly a bug.
+
+### 9. Templates and generated documents
+
+Verify that:
+
+* Prescription generation uses the correct template.
+* Service Bill/Invoice generation uses the correct template.
+* Templates are actually connected to the Template Management section.
+* A5 Portrait sizing is correctly implemented where required.
+* PDF generation does not use an outdated template.
+* Preview and printing use the same template.
+* No old invoice/prescription template code is still being used accidentally.
+
+### 10. Final cleanup
+
+After completing the audit:
+
+* Fix confirmed issues.
+* Remove confirmed unused code/files/dependencies.
+* Resolve broken references.
+* Keep the project structure clean and understandable.
+* Do not change working functionality unnecessarily.
+* Do not remove features simply because they are not currently visible in the GUI.
+* Do not change database data or production records.
+
+### Important workflow
+
+**First analyze the complete project. Do not immediately start deleting or modifying files.**
+
+Create an internal understanding of:
+
+1. What each major module does.
+2. Which files/components are actively used.
+3. How frontend → backend → database connections work.
+4. Which features depend on which components.
+5. Which code is genuinely unused.
+6. Which issues are actual bugs versus intentional behavior.
+
+Then make the required fixes and cleanup.
+
+After completion, provide a concise summary containing:
+
+* Issues found
+* Issues fixed
+* Unused code/files removed
+* Dependencies cleaned up
+* Database issues found/fixed
+* Security issues found/fixed
+* Performance improvements
+* Any remaining issues that require attention
+
+**Most importantly: do not break any existing working functionality while performing the cleanup.**

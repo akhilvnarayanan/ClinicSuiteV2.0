@@ -71,7 +71,7 @@ begin
   if EndPos <= Length(Contents) then
   begin
     Value := Copy(Contents, StartPos, EndPos - StartPos);
-    Value := StringChangeEx(Value, '\\', '\', True);
+    StringChangeEx(Value, '\\', '\', True);
     Result := Value;
   end;
 end;
@@ -156,7 +156,7 @@ begin
     ForceDirectories(ConfigDir);
     ConfigFile := ConfigDir + '\config.json';
     DataDir := DataPage.Values[0];
-    DataDir := StringChangeEx(DataDir, '\', '\\', True);
+    StringChangeEx(DataDir, '\', '\\', True);
     S := '{"DataPath":"' + DataDir + '"}';
     SaveStringToFile(ConfigFile, S, False);
   end;

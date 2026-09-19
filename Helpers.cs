@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         if (Scalar<long>("SELECT COUNT(*) FROM DocumentTemplates") == 0) SaveTemplates(new(TemplateDefaults.PrescriptionHtml, TemplateDefaults.InvoiceHtml));
         else MigrateInvoiceTemplate(TemplateDefaults.LegacyInvoiceHtml, TemplateDefaults.InvoiceHtml);
         MigrateInvoiceTemplate(TemplateDefaults.PreviousInvoiceHtml, TemplateDefaults.InvoiceHtml);
+        MigrateInvoiceTemplate(TemplateDefaults.PreviousServiceBillInvoiceHtml, TemplateDefaults.InvoiceHtml);
     }
     T Scalar<T>(string sql) { using var c = C.CreateCommand(); c.CommandText = sql; return (T)Convert.ChangeType(c.ExecuteScalar()!, typeof(T)); }
     public UserRow? FindUser(string u) { using var c = C.CreateCommand(); c.CommandText = "SELECT Username,PasswordHash,Role FROM Users WHERE Username=$u AND Active=1"; c.Parameters.AddWithValue("$u", u); using var r = c.ExecuteReader(); return r.Read() ? new(r.GetString(0), r.GetString(1), r.GetString(2)) : null; }

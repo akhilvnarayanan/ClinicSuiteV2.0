@@ -551,7 +551,7 @@ app.MapPost("/api/clinic-logo", async (HttpContext c, IFormFile file) => {
     var path = Path.Combine(folder, "clinic-logo" + ext);
     await using (var stream = File.Create(path)) await file.CopyToAsync(stream);
     return Results.Ok(new { logoPath = "/api/clinic-logo/file" });
-});
+}).DisableAntiforgery();
 app.MapGet("/api/clinic-logo/file", (HttpContext c) => {
     if (!Auth(c)) return Results.Unauthorized();
     var path = Directory.GetFiles(Path.Combine(dataRoot, "Branding"), "clinic-logo.*").FirstOrDefault();
@@ -649,7 +649,7 @@ app.MapPost("/api/restore", async (HttpContext c, IFormFile file) => {
     {
         try { if (File.Exists(upload)) File.Delete(upload); } catch { }
     }
-});
+}).DisableAntiforgery();
 
 app.MapPost("/api/documents/{patientId:int}/{visitId:int}", async (HttpContext c,int patientId,int visitId,IFormFile file) => {
     if(!Auth(c)) return Results.Unauthorized();
@@ -664,7 +664,7 @@ app.MapPost("/api/documents/{patientId:int}/{visitId:int}", async (HttpContext c
     await using(var fs=File.Create(path)) await file.CopyToAsync(fs);
     db.AddDocument(patientId,visitId,Path.GetRelativePath(dataRoot,path),originalName);
     return Results.Ok(new{path});
-});
+}).DisableAntiforgery();
 app.MapGet("/api/documents/{patientId:int}/{visitId:int}", (HttpContext c,int patientId,int visitId) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return !db.VisitBelongsToPatient(visitId,patientId)?Results.NotFound():Results.Ok(db.Documents(patientId,visitId)); });
 app.MapGet("/api/documents/{id:int}/view", (HttpContext c,int id) => {
     if(!Auth(c)) return Results.Unauthorized();
@@ -718,7 +718,7 @@ app.MapPost("/api/patient-documents/{patientId:int}", async (HttpContext c, int 
         originalName = Path.GetFileNameWithoutExtension(originalName) + ".pdf";
     var id = db.AddPatientDocument(patientId, Path.GetRelativePath(dataRoot, path), originalName);
     return Results.Ok(new { id, path });
-});
+}).DisableAntiforgery();
 app.MapGet("/api/patient-documents/{patientId:int}", (HttpContext c, int patientId) => {
     if (!Auth(c)) return Results.Unauthorized();
     using var db = new Db(dbPath);

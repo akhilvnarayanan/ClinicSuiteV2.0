@@ -1,0 +1,1 @@
+- [Invoice pending-charge allocation](billing-invoice-allocation.md) — Visit-level payments are applied FIFO to charges; invoices emit only remaining unpaid amounts.

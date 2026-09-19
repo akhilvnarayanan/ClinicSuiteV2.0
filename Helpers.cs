@@ -329,6 +329,7 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         // charges. This keeps fully settled charges out of future invoices.
         var unappliedPayment = Math.Max(0, paid);
         var services = new List<object>();
+        var billedTotal = charges.Sum(charge => charge.Amount);
         decimal total = 0;
         foreach (var charge in charges)
         {
@@ -376,7 +377,8 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
             services,
             total,
             paid,
-            balance = total - paid
+            billedTotal,
+            balance = total
         };
     }
     public object AddVisitService(int id,VisitServiceRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO VisitServices(VisitId,ServiceId,Description,Amount) VALUES($v,$s,$d,$a);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$s",x.ServiceId??(object)DBNull.Value); c.Parameters.AddWithValue("$d",x.Description); c.Parameters.AddWithValue("$a",x.Amount); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id}; }

@@ -71,13 +71,16 @@ string BackupDestination(ClinicSettings s, bool manual) {
 }
 var backupLock = new object();
 
-string CreateBackup(ClinicSettings s, bool manual)
+string CreateBackup(ClinicSettings s, bool manual, string? namePrefix = null)
 {
     lock (backupLock)
     {
         var folder = BackupDestination(s, manual);
         Directory.CreateDirectory(folder);
-        var backup = Path.Combine(folder, $"ClinicBackup_{DateTime.Now:yyyyMMdd_HHmmss}.zip");
+        var prefix = string.IsNullOrWhiteSpace(namePrefix) ? "ClinicBackup" : "ClinicBackup_" + namePrefix.Trim();
+        var stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        var uniqueSuffix = string.IsNullOrWhiteSpace(namePrefix) ? "" : "_" + Guid.NewGuid().ToString("N")[..8];
+        var backup = Path.Combine(folder, $"{prefix}_{stamp}{uniqueSuffix}.zip");
         var tempDb = Path.Combine(Path.GetTempPath(), "ClinicBackup_" + Guid.NewGuid().ToString("N") + ".db");
 
         try
@@ -222,7 +225,7 @@ string RestoreDatabaseFromArchive(string archivePath, ClinicSettings settings)
             }
 
             ValidateRestoreDatabase(restoredDb);
-            safetyBackup = CreateBackup(settings, true);
+            safetyBackup = CreateBackup(settings, true, "BeforeRestore");
 
             // Flush WAL state and release pooled handles before swapping database files.
             using (var checkpoint = new SqliteConnection($"Data Source={dbPath};Cache=Private;Pooling=false"))

@@ -294,18 +294,10 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
             consultationFee = r.GetDecimal(14);
         }
 
-        var services = new List<object>();
-        decimal total = consultationFee;
+        var charges = new List<(string Service, string Category, decimal Amount)>();
         if (consultationFee > 0)
         {
-            services.Add(new
-            {
-                service = "Consultation",
-                category = "Consultation",
-                rate = consultationFee,
-                quantity = 1,
-                amount = consultationFee
-            });
+            charges.Add(("Consultation", "Consultation", consultationFee));
         }
         using var serviceCommand = C.CreateCommand();
         serviceCommand.CommandText = @"SELECT vs.Description,CASE WHEN s.Id IS NULL THEN 'Custom service' ELSE 'Additional service' END,vs.Amount
@@ -318,15 +310,11 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         while (serviceReader.Read())
         {
             var amount = serviceReader.GetDecimal(2);
-            total += amount;
-            services.Add(new
-            {
-                service = serviceReader.IsDBNull(0) ? "Additional service" : serviceReader.GetString(0),
-                category = serviceReader.GetString(1),
-                rate = amount,
-                quantity = 1,
+            charges.Add((
+                serviceReader.IsDBNull(0) ? "Additional service" : serviceReader.GetString(0),
+                serviceReader.GetString(1),
                 amount
-            });
+            ));
         }
 
         decimal paid;
@@ -335,6 +323,29 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
             paymentCommand.CommandText = "SELECT COALESCE(SUM(Amount),0) FROM Payments WHERE VisitId=$v";
             paymentCommand.Parameters.AddWithValue("$v", visitId);
             paid = Convert.ToDecimal(paymentCommand.ExecuteScalar() ?? 0);
+        }
+
+        // Payments are visit-level records, so apply them FIFO to the visit's
+        // charges. This keeps fully settled charges out of future invoices.
+        var unappliedPayment = Math.Max(0, paid);
+        var services = new List<object>();
+        decimal total = 0;
+        foreach (var charge in charges)
+        {
+            var applied = Math.Min(charge.Amount, unappliedPayment);
+            var outstanding = charge.Amount - applied;
+            unappliedPayment = Math.Max(0, unappliedPayment - charge.Amount);
+            if (outstanding <= 0) continue;
+
+            total += outstanding;
+            services.Add(new
+            {
+                service = charge.Service,
+                category = charge.Category,
+                rate = outstanding,
+                quantity = 1,
+                amount = outstanding
+            });
         }
 
         return new

@@ -375,10 +375,37 @@ app.MapGet("/api/patients/{id:int}", (HttpContext c,int id) => { if(!Auth(c)) re
 app.MapGet("/api/patients/{id:int}/history", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.PatientHistory(id)); });
 app.MapGet("/api/visits", (HttpContext c,int? patientId) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Visits(patientId)); });
 app.MapGet("/api/visits/{id:int}", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); var v=db.Visit(id); return v is null?Results.NotFound():Results.Ok(v); });
-app.MapGet("/api/visits/{id:int}/invoice", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); var context=db.InvoiceContext(id); return context is null?Results.NotFound():Results.Ok(context); });
+app.MapGet("/api/visits/{id:int}/invoice", (HttpContext c,int id) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    using var db = new Db(dbPath);
+    if (db.Visit(id) is null) return Results.NotFound();
+    if (!db.HasPendingServiceInvoice(id))
+        return Results.Conflict(new { message = "No pending services available for billing." });
+    return Results.Ok(db.InvoiceContext(id));
+});
 app.MapGet("/api/visits/{id:int}/prescription", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); var context=db.PrescriptionContext(id); return context is null?Results.NotFound():Results.Ok(context); });
 app.MapPost("/api/visits", (HttpContext c, VisitRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.PatientId<=0) return Results.BadRequest(new{message="Patient is required."}); using var db=new Db(dbPath); try{return Results.Ok(db.AddVisit(r));}catch(InvalidOperationException ex){return Results.BadRequest(new{message=ex.Message});}catch(SqliteException){return Results.BadRequest(new{message="Patient or doctor does not exist."});} });
 app.MapPost("/api/visits/{id:int}/services", (HttpContext c,int id, VisitServiceRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.Amount<0||string.IsNullOrWhiteSpace(r.Description)) return Results.BadRequest(new{message="Description and non-negative amount are required."}); using var db=new Db(dbPath); return db.Visit(id) is null?Results.NotFound():Results.Ok(db.AddVisitService(id,r)); });
+app.MapGet("/api/visits/{id:int}/services", (HttpContext c, int id) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    using var db = new Db(dbPath);
+    return db.Visit(id) is null ? Results.NotFound() : Results.Ok(db.VisitServices(id));
+});
+app.MapPut("/api/visits/{visitId:int}/services/{serviceId:int}", (HttpContext c, int visitId, int serviceId, VisitServiceRequest r) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    if (r.Amount < 0 || string.IsNullOrWhiteSpace(r.Description))
+        return Results.BadRequest(new { message = "Description and non-negative amount are required." });
+    using var db = new Db(dbPath);
+    if (db.Visit(visitId) is null) return Results.NotFound();
+    try { return db.UpdateVisitService(visitId, serviceId, r) ? Results.Ok() : Results.NotFound(); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { message = ex.Message }); }
+});
+app.MapDelete("/api/visits/{visitId:int}/services/{serviceId:int}", (HttpContext c, int visitId, int serviceId) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    using var db = new Db(dbPath);
+    try { return db.DeleteVisitService(visitId, serviceId) ? Results.Ok(new { ok = true }) : Results.NotFound(); }
+    catch (InvalidOperationException ex) { return Results.BadRequest(new { message = ex.Message }); }
+});
  app.MapPost("/api/visits/{id:int}/payments", (HttpContext c,int id, PaymentRequest r) => {
      if(!Auth(c)) return Results.Unauthorized();
      if(r.Amount<=0) return Results.BadRequest(new{message="Payment must be positive."});

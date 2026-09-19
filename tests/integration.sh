@@ -27,16 +27,37 @@ request -H 'Content-Type: application/json' -d "{\"DoctorId\":$didoctor,\"Availa
 request -H 'Content-Type: application/json' -d '{"Name":"Removable Doctor","ConsultationFee":25}' "$base/api/doctors" >/dev/null; removableid="$(sqlite3 "$DATA/data/clinic.db" "SELECT Id FROM Doctors WHERE Name='Removable Doctor';")"; request -X DELETE "$base/api/doctors/$removableid" >/dev/null; doctor="$(request "$base/api/doctors")"; ! grepq 'Removable Doctor' "$doctor"
 request -H 'Content-Type: application/json' -d '{"Name":"Integration Service","Price":25}' "$base/api/services" >/dev/null
 service="$(request "$base/api/services")"; diservice="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$service")"; request -X PUT -H 'Content-Type: application/json' -d '{"Name":"Updated Service","Price":30,"Active":false}' "$base/api/services/$diservice" >/dev/null; service="$(request "$base/api/services")"; grepq '"active":false' "$service"; [[ "$(status -X PUT -H 'Content-Type: application/json' -d '{"Name":"Nobody","Price":1}' "$base/api/services/99999")" == 404 ]]
+request -H 'Content-Type: application/json' -d '{"Name":"Billing Service","Price":25}' "$base/api/services" >/dev/null
+active_service_id="$(sqlite3 "$DATA/data/clinic.db" "SELECT Id FROM Services WHERE Name='Billing Service';")"
 [[ "$(status -H 'Content-Type: application/json' -d '{"Name":"","ConsultationFee":-1}' "$base/api/patients")" == 400 ]]
 visit="$(request -H 'Content-Type: application/json' -d "{\"PatientId\":$pid,\"DoctorId\":$didoctor,\"VisitDate\":\"2025-01-01T10:00:00\",\"VisitType\":\"Follow-up\",\"Notes\":\"checkup\",\"ConsultationFee\":50}" "$base/api/visits")"; vid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$visit")"
 visit_detail="$(request "$base/api/visits/$vid")"; grepq '"visitDate":"2025-01-01T10:00:00"' "$visit_detail"
 [[ "$(status -X DELETE "$base/api/doctors/$didoctor")" == 409 ]]
-request -H 'Content-Type: application/json' -d '{"Description":"Lab test","Amount":25}' "$base/api/visits/$vid/services" >/dev/null
+charge="$(request -H 'Content-Type: application/json' -d "{\"ServiceId\":$active_service_id,\"Description\":\"Billing Service\",\"Amount\":25}" "$base/api/visits/$vid/services")"; chargeid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$charge")"
 request -H 'Content-Type: application/json' -d '{"Amount":30,"Method":"Cash"}' "$base/api/visits/$vid/payments" >/dev/null
 [[ "$(status -H 'Content-Type: application/json' -d '{"Amount":50,"Method":"Cash"}' "$base/api/visits/$vid/payments")" == 400 ]]
-payments="$(request "$base/api/patients/$pid/payments")"; grepq '"amountPaid":30' "$payments"; grepq '"service":"Lab test"' "$payments"; grepq '"paymentDate":' "$payments"
+payments="$(request "$base/api/patients/$pid/payments")"; grepq '"amountPaid":30' "$payments"; grepq '"service":"Billing Service"' "$payments"; grepq '"paymentDate":' "$payments"
 visit_payments="$(request "$base/api/visits/$vid/payments")"; grepq '"amountPaid":30' "$visit_payments"
 visits="$(request "$base/api/visits")"; grepq '"total":75' "$visits"; grepq '"balance":45' "$visits"; grepq '"visitType":"Follow-up"' "$visits"; request "$base/api/visits/$vid" >/dev/null
+invoice="$(request "$base/api/visits/$vid/invoice")"; grepq '"total":25' "$invoice"; ! grep -q 'Consultation' <<<"$invoice"
+request -X PUT -H 'Content-Type: application/json' -d '{"ServiceId":'"$active_service_id"',"Description":"Billing Service edited","Amount":40}' "$base/api/visits/$vid/services/$chargeid" >/dev/null
+invoice="$(request "$base/api/visits/$vid/invoice")"; grepq '"total":40' "$invoice"; grepq 'Billing Service edited' "$invoice"
+service_price="$(sqlite3 "$DATA/data/clinic.db" "SELECT Price FROM Services WHERE Id=$active_service_id;")"; [[ "$service_price" == "25" || "$service_price" == "25.0" ]]
+dressing="$(request -H 'Content-Type: application/json' -d '{"Description":"Dressing","Amount":20}' "$base/api/visits/$vid/services")"; dressingid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$dressing")"
+invoice="$(request "$base/api/visits/$vid/invoice")"; grepq '"total":60' "$invoice"
+request -X DELETE "$base/api/visits/$vid/services/$chargeid" >/dev/null
+[[ "$(sqlite3 "$DATA/data/clinic.db" "SELECT COUNT(*) FROM VisitServices WHERE Id=$chargeid;")" == "0" ]]; [[ "$(sqlite3 "$DATA/data/clinic.db" "SELECT COUNT(*) FROM Services WHERE Id=$active_service_id;")" == "1" ]]
+invoice="$(request "$base/api/visits/$vid/invoice")"; grepq '"total":20' "$invoice"; ! grep -q 'Billing Service edited' <<<"$invoice"
+request -X DELETE "$base/api/visits/$vid/services/$dressingid" >/dev/null
+no_invoice="$(curl -sS -b "$COOKIE" -c "$COOKIE" "$base/api/visits/$vid/invoice")"; grepq 'No pending services available for billing.' "$no_invoice"
+final_charge="$(request -H 'Content-Type: application/json' -d '{"Description":"Final service","Amount":15}' "$base/api/visits/$vid/services")"; finalid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$final_charge")"
+invoice="$(request "$base/api/visits/$vid/invoice")"; grepq '"total":15' "$invoice"; grepq 'Final service' "$invoice"
+request -H 'Content-Type: application/json' -d '{"Amount":25,"Method":"Cash"}' "$base/api/visits/$vid/payments" >/dev/null
+invoice="$(request "$base/api/visits/$vid/invoice")"; grepq '"total":10' "$invoice"
+request -H 'Content-Type: application/json' -d '{"Amount":10,"Method":"Cash"}' "$base/api/visits/$vid/payments" >/dev/null
+no_invoice="$(curl -sS -b "$COOKIE" -c "$COOKIE" "$base/api/visits/$vid/invoice")"; grepq 'No pending services available for billing.' "$no_invoice"
+[[ "$(status -X PUT -H 'Content-Type: application/json' -d '{"ServiceId":null,"Description":"Paid edit","Amount":99}' "$base/api/visits/$vid/services/$finalid")" == 400 ]]
+[[ "$(status -X DELETE "$base/api/visits/$vid/services/$finalid")" == 400 ]]
 dashboard="$(request "$base/api/dashboard")"; grepq '"newPatientsThisMonth":' "$dashboard"; grepq '"recentVisits":' "$dashboard"; request "$base/api/reports/daily?date=2025-01-01" >/dev/null
 request -H 'Content-Type: application/json' -d '{"ClinicName":"Integration Clinic","Currency":"INR"}' "$base/api/settings" >/dev/null
 profile="$(request "$base/api/clinic-profile")"; grepq '"clinicName":"Integration Clinic"' "$profile"
@@ -66,6 +87,8 @@ mkdir -p "$DATA/extracted"; unzip -q "$backup" -d "$DATA/extracted"
 restored="$(curl -fsS -b "$COOKIE" -c "$COOKIE" -F "file=@$backup" "$base/api/restore")"; grepq 'Database restored successfully' "$restored"
 curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login" >/dev/null
 [[ "$(find "$custom_backup" -name '*.zip' -print -quit)" == "" ]]
+consultation_only="$(request -H 'Content-Type: application/json' -d "{\"PatientId\":$pid,\"DoctorId\":$didoctor,\"VisitDate\":\"2025-02-01T10:00:00\",\"VisitType\":\"Consultation only\",\"Notes\":\"consultation test\",\"ConsultationFee\":100}" "$base/api/visits")"; consultation_visit_id="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$consultation_only")"
+consultation_invoice="$(curl -sS -b "$COOKIE" -c "$COOKIE" "$base/api/visits/$consultation_visit_id/invoice")"; grepq 'No pending services available for billing.' "$consultation_invoice"
 second="$(request -H 'Content-Type: application/json' -d '{"Username":"testuser","Password":"Test@123","Role":"Receptionist"}' "$base/api/users" 2>/dev/null || true)"
 [[ "$(status -H 'Content-Type: application/json' -d '{"Username":"testuser","Password":"Test@123","Role":"Receptionist"}' "$base/api/users")" == 409 ]]
 printf 'other patient' >"$DATA/other.txt"

@@ -224,7 +224,7 @@
 <section id="login" class="login"><div class="login-art"><div class="mark login-product-name">Clinic Suite</div><h1 class="login-tagline">Care, Kept in Order.</h1><div class="login-divider"></div><p class="login-product">Complete Clinic Management Software</p><p class="login-description">Simplifying clinic operations while helping every patient feel cared for.</p><ul class="login-features"><li><span class="feature-icon"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M3.5 18c.6-3 2.4-4.5 5.5-4.5s4.9 1.5 5.5 4.5M14 14.5c3.5-.5 5.6.7 6.5 3.5"/></svg></span>Patient Management</li><li><span class="feature-icon"><svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 9h16M8 13h2M14 13h2M8 17h2M14 17h2"/></svg></span>Visits &amp; Billing</li><li><span class="feature-icon"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM15 3v5h4M9 12h6M9 16h6"/></svg></span>Prescriptions &amp; Records</li><li><span class="feature-icon"><svg viewBox="0 0 24 24"><path d="M5 20V11M12 20V5M19 20v-7"/></svg></span>Reports &amp; Administration</li></ul><div class="login-art-credit">Developed by <strong>AVN TechSphere</strong></div></div><div class="login-box"><form class="login-card" onsubmit="login(event)"><h2>Sign in to Clinic Suite</h2><p class="sub">Enter your account details to continue.</p><label class="field login-input-only"><input id="u" autocomplete="username" placeholder="Enter username" aria-label="Username" required></label><label class="field login-input-only"><input id="p" type="password" autocomplete="current-password" placeholder="Enter password" aria-label="Password" required></label><label class="show-password"><input type="checkbox" onchange="$('p').type=this.checked?'text':'password'">Show password</label><div id="loginErr"></div><button class="btn wide" type="submit">Login</button><p class="developer-credit">Developed by <strong>AVN TechSphere</strong></p></form></div></section>
 <section id="app" class="app"><aside class="side"><div class="brand"><i id="brandLogo"><span>+</span><img alt=""></i><div><strong id="brandClinicName">CLINIC DESK</strong></div></div><nav class="nav"><div class="nav-label">Workspace</div><button data-page="dashboard" onclick="page('dashboard')">▦ <span>Overview</span></button><button data-page="patients" onclick="page('patients')">♙ <span>Patients</span></button><button data-page="billing" onclick="page('billing')">▤ <span>Billing</span></button><button data-page="visits" onclick="page('visits')">⌁ <span>Visit & income reports</span></button><button data-page="reports" onclick="page('reports')">▤ <span>Daily report</span></button><div class="nav-label admin-only">Manage</div><button class="admin-only" data-page="doctors" onclick="page('doctors')">＋ <span>Doctors</span></button><button class="admin-only" data-page="services" onclick="page('services')">◈ <span>Services</span></button><button class="admin-only" data-page="users" onclick="page('users')">♙ <span>Users</span></button><button class="admin-only" data-page="settings" onclick="page('settings')">⚙ <span>Clinic settings</span></button><button class="admin-only" data-page="templates" onclick="page('templates')">▤ <span>Templates</span></button><button class="admin-only" data-page="backup" onclick="page('backup')">▣ <span>Backup</span></button></nav><div class="side-foot"><span id="sideRole"></span><button onclick="logout()">Sign out →</button></div></aside><main class="main"><div id="content" class="workspace"></div></main></section>
 <script>
-  let role='',currentPatient=null,currentVisit=null,currentSettings=null,currentTemplates=null,pendingPayment=null,visitReportRows=[],billingRows=[],clinic={clinicName:'Harborline Clinic',currency:'SGD'},visitClockTimer=null;
+  let role='',currentPatient=null,currentVisit=null,currentVisitServices=[],currentVisitServiceCatalog=[],currentSettings=null,currentTemplates=null,pendingPayment=null,visitReportRows=[],billingRows=[],clinic={clinicName:'Harborline Clinic',currency:'SGD'},visitClockTimer=null;
 const $=id=>document.getElementById(id), esc=v=>String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])), money=v=>`${clinic.currency||'SGD'} ${Number(v||0).toFixed(2)}`, today=()=>new Date().toISOString().slice(0,10);
  async function api(url,opt={}){let request={...opt};if(!request.method||request.method.toUpperCase()==='GET')request.cache='no-store';let r=await fetch(url,request);if(r.status===401&&url!=='/api/login'){showLogin();throw Error('Your session has expired. Please sign in again.')}let t=await r.text();if(!r.ok){try{t=JSON.parse(t).message||t}catch{}throw Error(t||`Request failed (${r.status})`)}return t?JSON.parse(t):null}
 const json=(method,body)=>({method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -266,14 +266,18 @@ function exportVisitReportCsv(){try{let a=selectedVisitRows(),from=$('visitFrom'
  async function saveVisit(e){e.preventDefault();try{let r=await api('/api/visits',json('POST',{PatientId:+$('vpatient').value,DoctorId:$('vdoctor').value?+$('vdoctor').value:null,VisitType:$('vtype')?.value||'General consultation',Notes:$('vnotes').value.trim(),ConsultationFee:+$('vfee').value}));stopVisitClock();visitDetail(r.id)}catch(x){$('formError').innerHTML=`<p class="error">${esc(x.message)}</p>`}}
 async function visitDetail(id){
     let v=await api('/api/visits/'+id);
-    let [ss,payments]=await Promise.all([api('/api/services'),api(`/api/visits/${id}/payments`)]);
+    let [ss,payments,charges]=await Promise.all([api('/api/services'),api(`/api/visits/${id}/payments`),api(`/api/visits/${id}/services`)]);
     currentVisit=v;
+    currentVisitServices=charges;
+    currentVisitServiceCatalog=ss;
      header('Visit detail','Visits');$('content').classList.add('billing-page');
       $('content').innerHTML=`<div class="actions back"><button class="btn ghost" onclick="visits()">← Visits</button><button class="btn" onclick="billingDetail(${id})">Print Invoice</button><button class="btn" onclick="printPrescription()">Print Prescription</button></div><div class="panel"><div class="detail-head"><div><span class="eyebrow">${esc(v.patientCode)} · Visit ${v.id}</span><h2>${esc(v.patientName)}</h2><p class="muted">${esc(v.visitDate)} · ${esc(v.doctorName)||'No doctor assigned'}</p></div><span id="visitStatus" class="badge ${v.balance>0?'coral':''}">${v.balance>0?'Balance due':'Paid in full'}</span></div><p>${esc(v.notes)||'No visit notes.'}</p></div><div class="mini-grid"><div class="stat"><span class="label">Total</span><b id="visitTotal">${money(v.total)}</b></div><div class="stat"><span class="label">Paid</span><b id="visitPaid">${money(v.paid)}</b></div><div class="stat"><span class="label">Balance</span><b id="visitBalance">${money(v.balance)}</b></div></div><div class="panel"><h3>Add a charge</h3><form onsubmit="addService(event)" class="row"><label class="field">Service<select id="sservice" required><option value="">Select a service</option>${ss.map(s=>`<option value="${+s.id}" data-name="${esc(s.name)}" data-price="${+s.price||0}">${esc(s.name)}</option>`).join('')}<option value="__custom">Custom service</option></select></label><label class="field" id="customServiceWrap" style="display:none">Custom service name<input id="sdesc" maxlength="200"></label><label class="field">Amount<input id="samount" type="number" min="0" step=".01" required></label><div class="form-actions"><button class="btn" type="submit">Add charge</button></div></form></div><div class="panel"><h3>Record payment</h3><form onsubmit="addPayment(event)" class="row"><label class="field">Amount<input id="pamount" type="number" min=".01" step=".01" required></label><label class="field">Method<select id="pmethod"><option>Cash</option><option>UPI</option><option>Card</option><option>Others</option></select></label><div class="form-actions"><button class="btn" type="submit">Record payment</button></div></form><div id="paymentHistory"></div></div><div class="panel"><h3>Documents</h3><form onsubmit="uploadDocument(event)" class="actions"><input id="docfile" type="file" required><button class="btn alt" type="submit">Upload document</button></form><div id="docs" class="muted">Loading documents…</div></div>`;
     $('content').querySelector('button[onclick^="billingDetail"]')?.replaceChildren(document.createTextNode('Open Invoice'));
     $('pamount').max=Math.max(0,Number(v.balance||0)).toFixed(2);
     $('docfile').accept='.pdf,.jpg,.jpeg,.png,.txt';
     $('paymentHistory').insertAdjacentHTML('beforebegin','<div id="paymentError" aria-live="polite"></div>');
+    $('content').insertAdjacentHTML('beforeend','<div id="serviceChargesPanel" class="panel"></div>');
+    renderVisitServices();
     renderPaymentHistory(payments);
     let service=$('sservice'), amount=$('samount'), custom=$('customServiceWrap'), desc=$('sdesc');
     service.onchange=()=>{
@@ -296,7 +300,56 @@ async function addService(e){
         if(!Number.isFinite(amount)||amount<0){fail(new Error('Enter a valid non-negative amount.'));return}
         await api(`/api/visits/${currentVisit.id}/services`,json('POST',{ServiceId:custom||!serviceId?null:+serviceId,Description:description,Amount:amount}));
         visitDetail(currentVisit.id)
-    }catch(x){fail(x)}
+    }catch(x){serviceChargeError(x.message)}
+}
+function serviceChargeError(message){
+    if($('serviceChargesMsg'))$('serviceChargesMsg').innerHTML=`<p class="error" role="alert">${esc(message)}</p>`;
+    else fail(new Error(message));
+}
+function visitServiceOptions(selectedId){
+    let options='<option value="">Custom service</option>';
+    currentVisitServiceCatalog.forEach(s=>{
+        let selected=+selectedId===+s.id?' selected':'';
+        options+=`<option value="${+s.id}" data-name="${esc(s.name)}" data-price="${+s.price||0}"${selected}>${esc(s.name)} · ${money(s.price)}</option>`;
+    });
+    if(selectedId&&!currentVisitServiceCatalog.some(s=>+s.id===+selectedId)){
+        let current=currentVisitServices.find(x=>+x.serviceId===+selectedId);
+        if(current)options+=`<option value="${+selectedId}" selected>${esc(current.serviceName||current.description)} · inactive</option>`;
+    }
+    return options;
+}
+function renderVisitServices(){
+    let panel=$('serviceChargesPanel');
+    if(!panel)return;
+    let rows=currentVisitServices.length?currentVisitServices.map(x=>`<tr id="visit-service-${+x.id}"><td><b>${esc(x.description||x.serviceName||'Additional service')}</b>${x.serviceId?`<span class="muted" style="display:block;font-size:11px">${esc(x.serviceName||'Service')}</span>`:'<span class="muted" style="display:block;font-size:11px">Custom service</span>'}</td><td class="money">${money(x.amount)}</td><td><div class="table-actions"><button class="btn table-action action-edit" type="button" onclick="editVisitService(${+x.id})">Edit</button><button class="btn table-action action-delete" type="button" onclick="removeVisitService(${+x.id})">Remove</button></div></td></tr>`).join(''):'<tr><td colspan="3"><div class="empty">No additional service charges added yet.</div></td></tr>';
+    panel.innerHTML=`<div class="panel-head"><div><h3>Additional service charges</h3><span class="muted">Review charges included in the service invoice.</span></div><span class="badge">${currentVisitServices.length} charge${currentVisitServices.length===1?'':'s'}</span></div><div id="serviceChargesMsg" aria-live="polite"></div><div class="table-wrap"><table><thead><tr><th>Service</th><th>Amount</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function editVisitService(id){
+    let charge=currentVisitServices.find(x=>+x.id===+id),row=$(`visit-service-${id}`);
+    if(!charge||!row)return;
+    row.innerHTML=`<td colspan="3"><form class="service-edit-form" onsubmit="saveVisitService(event,${+id})"><label class="field">Service<select id="editServiceSelect" onchange="syncEditedService()">${visitServiceOptions(charge.serviceId)}</select></label><label class="field">Description<input id="editServiceDescription" maxlength="200" value="${esc(charge.description)}" required></label><label class="field">Amount<input id="editServiceAmount" type="number" min="0" step=".01" value="${+charge.amount||0}" required></label><div class="form-actions"><button class="btn" type="submit">Save charge</button><button class="btn alt" type="button" onclick="renderVisitServices()">Cancel</button></div></form></td>`;
+}
+function syncEditedService(){
+    let select=$('editServiceSelect'),option=select?.selectedOptions[0];
+    if(select?.value&&option){
+        $('editServiceDescription').value=option.dataset.name||'';
+        $('editServiceAmount').value=option.dataset.price||'0';
+    }
+}
+async function saveVisitService(e,id){
+    e.preventDefault();
+    let select=$('editServiceSelect'),description=$('editServiceDescription').value.trim(),amount=+$('editServiceAmount').value;
+    if(!description||!Number.isFinite(amount)||amount<0){serviceChargeError('Enter a service description and a valid non-negative amount.');return}
+    try{
+        await api(`/api/visits/${currentVisit.id}/services/${id}`,json('PUT',{ServiceId:select.value?+select.value:null,Description:description,Amount:amount}));
+        visitDetail(currentVisit.id);
+    }catch(x){serviceChargeError(x.message)}
+}
+async function removeVisitService(id){
+    let charge=currentVisitServices.find(x=>+x.id===+id);
+    if(!charge||!confirm(`Remove ${charge.description||charge.serviceName||'this charge'}?`))return;
+    try{await api(`/api/visits/${currentVisit.id}/services/${id}`,{method:'DELETE'});visitDetail(currentVisit.id)}
+    catch(x){serviceChargeError(x.message)}
 }
 function renderPaymentHistory(a){
     let content=a.length?`<div class="table-wrap"><table><thead><tr><th>Payment date</th><th>Service</th><th>Amount paid</th></tr></thead><tbody>${a.map(p=>`<tr><td>${esc(String(p.paymentDate||'').replace('T',' '))}</td><td>${esc(p.service||'Consultation')}</td><td class="money">${money(p.amountPaid)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No payments recorded for this visit yet.</div>';
@@ -373,7 +426,7 @@ function prescriptionTemplateValues(d){
     let doctorName=(doc.name||'').trim();
     return {...base,'patient.code':esc(p.patientCode||''),'patient.name':esc(p.name||''),'patient.age':esc(prescriptionAge(p.dateOfBirth,v.dateOnly)),'patient.gender':esc(p.gender||''),'visit.date':esc(prescriptionDate(v.dateOnly)),'visit.validTill':esc(prescriptionDate(v.validTill)),'doctor.heading':doctorName?`DR. ${esc(doctorName.toUpperCase())}`:'DOCTOR','doctor.specialization':markup('doctor-specialization',doc.specialization),'doctor.registration':doc.registrationNo?`<div>Reg No: ${esc(doc.registrationNo)}</div>`:'','vitals':'<div class="vital-row">BP:</div><div class="vital-row">Temp:</div><div class="vital-row">Pulse:</div><div class="vital-row">SpO₂:</div><div class="vital-row">Weight:</div>'};
 }
- async function billingDetail(id){let[v,t,d]=await Promise.all([api('/api/visits/'+id),api('/api/templates'),api(`/api/visits/${id}/invoice`)]),values=invoiceTemplateValues(v,d.clinic,d),fullDocument=isFullHtmlDocument(t.invoiceHtml),invoice=templateFragment(t.invoiceHtml,values);header('Service Bill','Billing');$('content').innerHTML=`<div class="actions no-print back"><button class="btn ghost" onclick="visitDetail(${id})">← Visit</button><button class="btn" onclick="printInvoice(${id})">Print service bill</button></div><div class="panel ${fullDocument?'invoice-template-custom':'invoice-template'}">${invoice}</div>`}
+ async function billingDetail(id){header('Service Bill','Billing');try{let[v,t,d]=await Promise.all([api('/api/visits/'+id),api('/api/templates'),api(`/api/visits/${id}/invoice`)]),values=invoiceTemplateValues(v,d.clinic,d),fullDocument=isFullHtmlDocument(t.invoiceHtml),invoice=templateFragment(t.invoiceHtml,values);$('content').innerHTML=`<div class="actions no-print back"><button class="btn ghost" onclick="visitDetail(${id})">← Visit</button><button class="btn" onclick="printInvoice(${id})">Print service bill</button></div><div class="panel ${fullDocument?'invoice-template-custom':'invoice-template'}">${invoice}</div>`}catch(x){$('content').innerHTML=`<div class="panel"><p class="error" role="alert">${esc(x.message)}</p><button class="btn alt" onclick="visitDetail(${id})">Return to visit</button></div>`}}
 async function reports(){header('Daily reports','Reports');$('content').innerHTML=`<div class="welcome"><div><span class="eyebrow">Close of day</span><h2>Daily report</h2><p class="muted">A clean handover for the clinic ledger.</p></div><button class="btn alt" onclick="printPage()">Print report</button></div><div class="panel"><form class="actions no-print" onsubmit="loadReport(event)"><label class="field" style="margin:0">Report date<input id="reportDate" type="date" value="${today()}" required></label><button class="btn" type="submit">Load report</button></form><div id="report" class="loading">Loading report…</div></div>`;loadReport()}
 async function loadReport(e){if(e)e.preventDefault();try{let r=await api('/api/reports/daily?date='+encodeURIComponent($('reportDate').value));$('report').innerHTML=`<p class="eyebrow">${esc(r.date)}</p><div class="grid"><div class="stat"><span class="label">Visits</span><b>${r.visits}</b></div><div class="stat"><span class="label">Billed</span><b>${money(r.billed)}</b></div><div class="stat"><span class="label">Collected</span><b>${money(r.collected)}</b></div><div class="stat gold"><span class="label">Outstanding</span><b>${money(r.balance)}</b></div></div>`}catch(x){$('report').innerHTML=`<p class="error">${esc(x.message)}</p>`}}
  async function doctors(){let a=await api('/api/doctors');$('content').innerHTML=`<div class="welcome"><div><span class="eyebrow">Directory</span><h2>Doctors</h2></div><button class="btn" onclick="newDoctor()">＋ Add doctor</button></div><div class="panel"><div id="doctorMsg"></div><div class="table-wrap"><table><thead><tr><th>Name</th><th>Specialisation</th><th>Phone</th><th>Reg No</th><th>Consultation fee</th><th>Status</th><th></th></tr></thead><tbody>${a.length?a.map(x=>`<tr><td><b>${esc(x.name)}</b></td><td>${esc(x.specialization)||'—'}</td><td>${esc(x.phone)||'—'}</td><td>${esc(x.registrationNo)||'—'}</td><td class="money">${money(x.consultationFee)}</td><td><span class="badge ${x.active?'':'coral'}">${x.active?'Active':'Inactive'}</span></td><td><div class="table-actions"><button class="btn table-action action-edit" onclick="editDoctor(${+x.id})">Edit</button><button class="btn table-action action-delete" onclick="deleteDoctor(${+x.id},'${esc(x.name)}')">Delete</button></div></td></tr>`).join(''):'<tr><td colspan="7"><div class="empty">No doctors added yet.</div></td></tr>'}</tbody></table></div></div>`}
@@ -435,7 +488,7 @@ async function browseFolder(inputId,msgId){let m=$(msgId);m.innerHTML='<p class=
               pending.forEach(image=>{image.addEventListener('load',done,{once:true});image.addEventListener('error',done,{once:true})});
               setTimeout(print,1000);
           }else setTimeout(print,150);
-      }catch(x){w.close();fail(x)}
+      }catch(x){w.close();billingDetail(id)}
   }
  function prescriptionDate(value){let s=String(value||'').slice(0,10),parts=s.split('-');return parts.length===3&&parts[0].length===4?`${parts[2]}/${parts[1]}/${parts[0]}`:s}
  function prescriptionAge(dateOfBirth,onDate){if(!dateOfBirth)return'';let birth=new Date(`${String(dateOfBirth).slice(0,10)}T00:00:00`),at=new Date(`${String(onDate||'').slice(0,10)}T00:00:00`);if(Number.isNaN(birth.getTime())||Number.isNaN(at.getTime()))return'';let age=at.getFullYear()-birth.getFullYear(),birthday=new Date(at.getFullYear(),birth.getMonth(),birth.getDate());if(at<birthday)age--;return age>=0?String(age):''}

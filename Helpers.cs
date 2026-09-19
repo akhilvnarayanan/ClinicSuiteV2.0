@@ -333,10 +333,6 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         }
 
         var charges = new List<(string Service, string Category, decimal Amount)>();
-        if (consultationFee > 0)
-        {
-            charges.Add(("Consultation", "Consultation", consultationFee));
-        }
         using var serviceCommand = C.CreateCommand();
         serviceCommand.CommandText = @"SELECT vs.Description,CASE WHEN s.Id IS NULL THEN 'Custom service' ELSE 'Additional service' END,vs.Amount
                                        FROM VisitServices vs
@@ -363,11 +359,13 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
             paid = Convert.ToDecimal(paymentCommand.ExecuteScalar() ?? 0);
         }
 
-        // Payments are visit-level records, so apply them FIFO to the visit's
-        // charges. This keeps fully settled charges out of future invoices.
-        var unappliedPayment = Math.Max(0, paid);
+        // Payments are visit-level records. Existing payment allocation applies
+        // them FIFO, so consultation is settled first and only the remainder
+        // can settle additional services. Consultation never enters this bill.
+        var serviceBilledTotal = charges.Sum(charge => charge.Amount);
+        var servicePaid = Math.Min(serviceBilledTotal, Math.Max(0, paid - Math.Max(0, consultationFee)));
+        var unappliedPayment = servicePaid;
         var services = new List<object>();
-        var billedTotal = charges.Sum(charge => charge.Amount);
         decimal total = 0;
         foreach (var charge in charges)
         {
@@ -415,9 +413,74 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
             services,
             total,
             paid,
-            billedTotal,
+            billedTotal = serviceBilledTotal,
             balance = total
         };
+    }
+    public bool HasPendingServiceInvoice(int visitId)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = @"SELECT COALESCE((SELECT SUM(Amount) FROM VisitServices WHERE VisitId=$v),0),
+                                 COALESCE((SELECT ConsultationFee FROM Visits WHERE Id=$v),0),
+                                 COALESCE((SELECT SUM(Amount) FROM Payments WHERE VisitId=$v),0)";
+        c.Parameters.AddWithValue("$v", visitId);
+        using var r = c.ExecuteReader();
+        if (!r.Read()) return false;
+        var serviceTotal = r.GetDecimal(0);
+        var consultation = Math.Max(0, r.GetDecimal(1));
+        var paid = Math.Max(0, r.GetDecimal(2));
+        return serviceTotal > Math.Min(serviceTotal, Math.Max(0, paid - consultation));
+    }
+    public object VisitServices(int visitId)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = @"SELECT vs.Id,vs.ServiceId,vs.Description,vs.Amount,
+                                 COALESCE(s.Name,''),COALESCE(s.Price,0),COALESCE(s.Active,0)
+                          FROM VisitServices vs
+                          LEFT JOIN Services s ON s.Id=vs.ServiceId
+                          WHERE vs.VisitId=$v
+                          ORDER BY vs.Id";
+        c.Parameters.AddWithValue("$v", visitId);
+        using var r = c.ExecuteReader();
+        var services = new List<object>();
+        while (r.Read())
+        {
+            services.Add(new
+            {
+                id = r.GetInt64(0),
+                serviceId = r.IsDBNull(1) ? (long?)null : r.GetInt64(1),
+                description = r.GetString(2),
+                amount = r.GetDecimal(3),
+                serviceName = r.GetString(4),
+                servicePrice = r.GetDecimal(5),
+                serviceActive = r.GetInt64(6) == 1
+            });
+        }
+        return services;
+    }
+    bool VisitServiceHasAllocatedPayment(int visitId, int serviceId)
+    {
+        using var summary = C.CreateCommand();
+        summary.CommandText = @"SELECT COALESCE((SELECT ConsultationFee FROM Visits WHERE Id=$v),0),
+                                       COALESCE((SELECT SUM(Amount) FROM Payments WHERE VisitId=$v),0)";
+        summary.Parameters.AddWithValue("$v", visitId);
+        using var summaryReader = summary.ExecuteReader();
+        if (!summaryReader.Read()) return false;
+        var consultation = Math.Max(0, summaryReader.GetDecimal(0));
+        var unappliedPayment = Math.Max(0, summaryReader.GetDecimal(1) - consultation);
+
+        using var charges = C.CreateCommand();
+        charges.CommandText = "SELECT Id,Amount FROM VisitServices WHERE VisitId=$v ORDER BY Id";
+        charges.Parameters.AddWithValue("$v", visitId);
+        using var chargeReader = charges.ExecuteReader();
+        while (chargeReader.Read())
+        {
+            var amount = chargeReader.GetDecimal(1);
+            var applied = Math.Min(amount, unappliedPayment);
+            if (chargeReader.GetInt64(0) == serviceId) return applied > 0;
+            unappliedPayment = Math.Max(0, unappliedPayment - amount);
+        }
+        return false;
     }
     public object AddVisitService(int id,VisitServiceRequest x)
     {
@@ -437,6 +500,38 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         c.Parameters.AddWithValue("$d",x.Description.Trim());
         c.Parameters.AddWithValue("$a",x.Amount);
         return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id};
+    }
+    public bool UpdateVisitService(int visitId, int serviceId, VisitServiceRequest x)
+    {
+        if (VisitServiceHasAllocatedPayment(visitId, serviceId))
+            throw new InvalidOperationException("This charge has allocated payments and cannot be edited.");
+        if (x.ServiceId.HasValue)
+        {
+            using var service = C.CreateCommand();
+            service.CommandText = "SELECT Active FROM Services WHERE Id=$s";
+            service.Parameters.AddWithValue("$s", x.ServiceId.Value);
+            var active = service.ExecuteScalar();
+            if (active is null) throw new InvalidOperationException("The selected service does not exist.");
+            if (Convert.ToInt64(active) != 1) throw new InvalidOperationException("The selected service is inactive.");
+        }
+        using var c = C.CreateCommand();
+        c.CommandText = "UPDATE VisitServices SET ServiceId=$s,Description=$d,Amount=$a WHERE Id=$i AND VisitId=$v";
+        c.Parameters.AddWithValue("$i", serviceId);
+        c.Parameters.AddWithValue("$v", visitId);
+        c.Parameters.AddWithValue("$s", x.ServiceId ?? (object)DBNull.Value);
+        c.Parameters.AddWithValue("$d", x.Description.Trim());
+        c.Parameters.AddWithValue("$a", x.Amount);
+        return c.ExecuteNonQuery() == 1;
+    }
+    public bool DeleteVisitService(int visitId, int serviceId)
+    {
+        if (VisitServiceHasAllocatedPayment(visitId, serviceId))
+            throw new InvalidOperationException("This charge has allocated payments and cannot be removed.");
+        using var c = C.CreateCommand();
+        c.CommandText = "DELETE FROM VisitServices WHERE Id=$i AND VisitId=$v";
+        c.Parameters.AddWithValue("$i", serviceId);
+        c.Parameters.AddWithValue("$v", visitId);
+        return c.ExecuteNonQuery() == 1;
     }
     public object AddPayment(int id,PaymentRequest x)
     {

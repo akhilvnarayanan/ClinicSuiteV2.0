@@ -34,6 +34,7 @@ sealed class Db : IDisposable
         cmd.CommandText = @"CREATE TABLE IF NOT EXISTS Users(Id INTEGER PRIMARY KEY,Username TEXT UNIQUE NOT NULL,PasswordHash TEXT NOT NULL,Role TEXT NOT NULL,Active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS Patients(Id INTEGER PRIMARY KEY AUTOINCREMENT,PatientCode TEXT UNIQUE NOT NULL,Name TEXT NOT NULL,Phone TEXT,Email TEXT,Address TEXT,DateOfBirth TEXT,Gender TEXT,BloodGroup TEXT,Allergies TEXT,MedicalConditions TEXT,CreatedAt TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS Doctors(Id INTEGER PRIMARY KEY AUTOINCREMENT,Name TEXT NOT NULL,Specialization TEXT,Phone TEXT,RegistrationNo TEXT,ConsultationFee REAL NOT NULL DEFAULT 0,Active INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS DoctorAvailability(DoctorId INTEGER NOT NULL,AvailabilityDate TEXT NOT NULL,Available INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(DoctorId,AvailabilityDate),FOREIGN KEY(DoctorId) REFERENCES Doctors(Id));
 CREATE TABLE IF NOT EXISTS Services(Id INTEGER PRIMARY KEY AUTOINCREMENT,Name TEXT NOT NULL,Price REAL NOT NULL DEFAULT 0,Active INTEGER NOT NULL DEFAULT 1);
 CREATE TABLE IF NOT EXISTS Visits(Id INTEGER PRIMARY KEY AUTOINCREMENT,PatientId INTEGER NOT NULL,DoctorId INTEGER,VisitDate TEXT NOT NULL,VisitType TEXT NOT NULL DEFAULT 'General',Notes TEXT,ConsultationFee REAL NOT NULL DEFAULT 0,FOREIGN KEY(PatientId) REFERENCES Patients(Id),FOREIGN KEY(DoctorId) REFERENCES Doctors(Id));
 CREATE TABLE IF NOT EXISTS VisitServices(Id INTEGER PRIMARY KEY AUTOINCREMENT,VisitId INTEGER NOT NULL,ServiceId INTEGER,Description TEXT NOT NULL,Amount REAL NOT NULL,FOREIGN KEY(VisitId) REFERENCES Visits(Id));
@@ -76,9 +77,71 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
     public object? GetPatient(int id) { using var c = C.CreateCommand(); c.CommandText = "SELECT Id,PatientCode,Name,Phone,Email,Address,DateOfBirth,Gender,BloodGroup,Allergies,MedicalConditions FROM Patients WHERE Id=$i"; c.Parameters.AddWithValue("$i", id); using var r = c.ExecuteReader(); if (!r.Read()) return null; return new { Id = r.GetInt64(0), PatientCode = r.GetString(1), Name = r.GetString(2), Phone = r.IsDBNull(3) ? "" : r.GetString(3), Email = r.IsDBNull(4) ? "" : r.GetString(4), Address = r.IsDBNull(5) ? "" : r.GetString(5), DateOfBirth = r.IsDBNull(6) ? "" : r.GetString(6), Gender = r.IsDBNull(7) ? "" : r.GetString(7), BloodGroup = r.IsDBNull(8) ? "" : r.GetString(8), Allergies = r.IsDBNull(9) ? "" : r.GetString(9), MedicalConditions = r.IsDBNull(10) ? "" : r.GetString(10) }; }
     public string GetPatientCode(int id) { using var c = C.CreateCommand(); c.CommandText = "SELECT PatientCode FROM Patients WHERE Id=$i"; c.Parameters.AddWithValue("$i", id); return Convert.ToString(c.ExecuteScalar())!; }
     public bool VisitBelongsToPatient(int visitId, int patientId) { using var c=C.CreateCommand(); c.CommandText="SELECT 1 FROM Visits WHERE Id=$v AND PatientId=$p"; c.Parameters.AddWithValue("$v",visitId); c.Parameters.AddWithValue("$p",patientId); return c.ExecuteScalar() is not null; }
-    public object Doctors() { using var c=C.CreateCommand(); c.CommandText="SELECT Id,Name,Specialization,Phone,RegistrationNo,ConsultationFee,Active FROM Doctors ORDER BY Name"; using var r=c.ExecuteReader(); var a=new List<object>(); while(r.Read()) a.Add(new {id=r.GetInt64(0),name=r.GetString(1),specialization=r.IsDBNull(2)?"":r.GetString(2),phone=r.IsDBNull(3)?"":r.GetString(3),registrationNo=r.IsDBNull(4)?"":r.GetString(4),consultationFee=r.GetDecimal(5),active=r.GetInt64(6)==1}); return a; }
+    public object Doctors(bool availableOnly = false)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = availableOnly
+            ? "SELECT d.Id,d.Name,d.Specialization,d.Phone,d.RegistrationNo,d.ConsultationFee,d.Active FROM Doctors d JOIN DoctorAvailability a ON a.DoctorId=d.Id AND a.AvailabilityDate=$date AND a.Available=1 WHERE d.Active=1 ORDER BY d.Name"
+            : "SELECT Id,Name,Specialization,Phone,RegistrationNo,ConsultationFee,Active FROM Doctors ORDER BY Name";
+        if (availableOnly) c.Parameters.AddWithValue("$date", DateTime.Now.ToString("yyyy-MM-dd"));
+        using var r = c.ExecuteReader();
+        var a = new List<object>();
+        while (r.Read())
+            a.Add(new { id = r.GetInt64(0), name = r.GetString(1), specialization = r.IsDBNull(2) ? "" : r.GetString(2), phone = r.IsDBNull(3) ? "" : r.GetString(3), registrationNo = r.IsDBNull(4) ? "" : r.GetString(4), consultationFee = r.GetDecimal(5), active = r.GetInt64(6) == 1 });
+        return a;
+    }
+    public object DoctorAvailability()
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = @"SELECT d.Id,d.Name,d.Specialization,d.RegistrationNo,
+                                 CASE WHEN a.Available=1 THEN 1 ELSE 0 END
+                          FROM Doctors d
+                          LEFT JOIN DoctorAvailability a
+                            ON a.DoctorId=d.Id AND a.AvailabilityDate=$date
+                          WHERE d.Active=1
+                          ORDER BY d.Name";
+        c.Parameters.AddWithValue("$date", DateTime.Now.ToString("yyyy-MM-dd"));
+        using var r = c.ExecuteReader();
+        var list = new List<object>();
+        while (r.Read())
+            list.Add(new { id = r.GetInt64(0), name = r.GetString(1), specialization = r.IsDBNull(2) ? "" : r.GetString(2), registrationNo = r.IsDBNull(3) ? "" : r.GetString(3), available = r.GetInt64(4) == 1 });
+        return list;
+    }
+    public bool DoctorAvailableToday(int id)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = @"SELECT EXISTS(
+                              SELECT 1 FROM Doctors d
+                              JOIN DoctorAvailability a ON a.DoctorId=d.Id
+                              WHERE d.Id=$id AND d.Active=1 AND a.AvailabilityDate=$date AND a.Available=1)";
+        c.Parameters.AddWithValue("$id", id);
+        c.Parameters.AddWithValue("$date", DateTime.Now.ToString("yyyy-MM-dd"));
+        return Convert.ToInt64(c.ExecuteScalar()) == 1;
+    }
+    public void SetDoctorAvailability(int id, bool available)
+    {
+        if (!DoctorIsActive(id)) throw new InvalidOperationException("Only active doctors can be marked available.");
+        using var c = C.CreateCommand();
+        c.CommandText = @"INSERT INTO DoctorAvailability(DoctorId,AvailabilityDate,Available)
+                          VALUES($id,$date,$available)
+                          ON CONFLICT(DoctorId,AvailabilityDate)
+                          DO UPDATE SET Available=$available";
+        c.Parameters.AddWithValue("$id", id);
+        c.Parameters.AddWithValue("$date", DateTime.Now.ToString("yyyy-MM-dd"));
+        c.Parameters.AddWithValue("$available", available ? 1 : 0);
+        c.ExecuteNonQuery();
+    }
+    bool DoctorIsActive(int id)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = "SELECT Active FROM Doctors WHERE Id=$id";
+        c.Parameters.AddWithValue("$id", id);
+        var value = c.ExecuteScalar();
+        return value is not null && Convert.ToInt64(value) == 1;
+    }
+    public bool DoctorAssignmentIsAvailable(int? id) => !id.HasValue || DoctorAvailableToday(id.Value);
     public void AddDoctor(DoctorRequest x) { using var c = C.CreateCommand(); c.CommandText = "INSERT INTO Doctors(Name,Specialization,Phone,RegistrationNo,ConsultationFee) VALUES($n,$s,$p,$r,$f)"; c.Parameters.AddWithValue("$n", x.Name.Trim()); c.Parameters.AddWithValue("$s", x.Specialization?.Trim() ?? ""); c.Parameters.AddWithValue("$p", x.Phone?.Trim() ?? ""); c.Parameters.AddWithValue("$r", x.RegistrationNo?.Trim() ?? ""); c.Parameters.AddWithValue("$f", x.ConsultationFee); c.ExecuteNonQuery(); }
-    public bool UpdateDoctor(int id, DoctorRequest x) { using var c = C.CreateCommand(); c.CommandText = "UPDATE Doctors SET Name=$n,Specialization=$s,Phone=$p,RegistrationNo=$r,ConsultationFee=$f,Active=$a WHERE Id=$i"; c.Parameters.AddWithValue("$i", id); c.Parameters.AddWithValue("$n", x.Name.Trim()); c.Parameters.AddWithValue("$s", x.Specialization ?? ""); c.Parameters.AddWithValue("$p", x.Phone ?? ""); c.Parameters.AddWithValue("$r", x.RegistrationNo?.Trim() ?? ""); c.Parameters.AddWithValue("$f", x.ConsultationFee); c.Parameters.AddWithValue("$a", x.Active ? 1 : 0); return c.ExecuteNonQuery() == 1; }
+    public bool UpdateDoctor(int id, DoctorRequest x) { using var c = C.CreateCommand(); c.CommandText = "UPDATE Doctors SET Name=$n,Specialization=$s,Phone=$p,RegistrationNo=$r,ConsultationFee=$f,Active=$a WHERE Id=$i"; c.Parameters.AddWithValue("$i", id); c.Parameters.AddWithValue("$n", x.Name.Trim()); c.Parameters.AddWithValue("$s", x.Specialization ?? ""); c.Parameters.AddWithValue("$p", x.Phone ?? ""); c.Parameters.AddWithValue("$r", x.RegistrationNo?.Trim() ?? ""); c.Parameters.AddWithValue("$f", x.ConsultationFee); c.Parameters.AddWithValue("$a", x.Active ? 1 : 0); var updated = c.ExecuteNonQuery() == 1; if (updated && !x.Active) { using var availability = C.CreateCommand(); availability.CommandText = "UPDATE DoctorAvailability SET Available=0 WHERE DoctorId=$i"; availability.Parameters.AddWithValue("$i", id); availability.ExecuteNonQuery(); } return updated; }
     public bool DoctorHasVisits(int id) { using var c=C.CreateCommand(); c.CommandText="SELECT EXISTS(SELECT 1 FROM Visits WHERE DoctorId=$i)"; c.Parameters.AddWithValue("$i",id); return Convert.ToInt64(c.ExecuteScalar())==1; }
     public bool DeleteDoctor(int id) { using var c=C.CreateCommand(); c.CommandText="DELETE FROM Doctors WHERE Id=$i"; c.Parameters.AddWithValue("$i",id); return c.ExecuteNonQuery()==1; }
     public object Services()
@@ -103,7 +166,7 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
     public void SaveSettings(ClinicSettings x) { using var c = C.CreateCommand(); c.CommandText = "INSERT INTO ClinicSettings(Id,ClinicName,Address,Phone,Email,Website,RegistrationNo,TaxNo,Currency,LogoPath,Footer,ManualBackupPath,BackupPath,BackupSchedule,BackupTime,BackupDay) VALUES(1,$n,$a,$p,$e,$w,$r,$t,$c,$l,$f,$mbp,$bp,$bs,$bt,$bd) ON CONFLICT(Id) DO UPDATE SET ClinicName=$n,Address=$a,Phone=$p,Email=$e,Website=$w,RegistrationNo=$r,TaxNo=$t,Currency=$c,LogoPath=$l,Footer=$f,ManualBackupPath=$mbp,BackupPath=$bp,BackupSchedule=$bs,BackupTime=$bt,BackupDay=$bd"; foreach (var p in new[] { ("$n", x.ClinicName), ("$a", x.Address ?? ""), ("$p", x.Phone ?? ""), ("$e", x.Email ?? ""), ("$w", x.Website ?? ""), ("$r", x.RegistrationNo ?? ""), ("$t", x.TaxNo ?? ""), ("$c", x.Currency ?? "SGD"), ("$l", x.LogoPath ?? ""), ("$f", x.Footer ?? ""), ("$mbp", x.ManualBackupPath ?? ""), ("$bp", x.BackupPath ?? ""), ("$bs", x.BackupSchedule ?? "Off"), ("$bt", x.BackupTime ?? "02:00"), ("$bd", x.BackupDay ?? "Monday") }) c.Parameters.AddWithValue(p.Item1, p.Item2); c.ExecuteNonQuery(); }
     public void MarkScheduledBackup(string when) { using var c = C.CreateCommand(); c.CommandText = "UPDATE ClinicSettings SET LastScheduledBackup=$t WHERE Id=1"; c.Parameters.AddWithValue("$t", when); c.ExecuteNonQuery(); }
     public void AddDocument(int p, int v, string path, string original) { using var c = C.CreateCommand(); c.CommandText = "INSERT INTO Documents(PatientId,VisitId,FilePath,OriginalName,CreatedAt) VALUES($p,$v,$f,$o,$t)"; c.Parameters.AddWithValue("$p", p); c.Parameters.AddWithValue("$v", v); c.Parameters.AddWithValue("$f", path); c.Parameters.AddWithValue("$o", original); c.Parameters.AddWithValue("$t", DateTime.Now.ToString("s")); c.ExecuteNonQuery(); }
-    public object AddVisit(VisitRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO Visits(PatientId,DoctorId,VisitDate,VisitType,Notes,ConsultationFee) VALUES($p,$d,$v,$ty,$n,$f);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$p",x.PatientId); c.Parameters.AddWithValue("$d",x.DoctorId??(object)DBNull.Value); c.Parameters.AddWithValue("$v",string.IsNullOrWhiteSpace(x.VisitDate)?DateTime.Now.ToString("s"):x.VisitDate); c.Parameters.AddWithValue("$ty",string.IsNullOrWhiteSpace(x.VisitType)?"General":x.VisitType.Trim()); c.Parameters.AddWithValue("$n",x.Notes??""); c.Parameters.AddWithValue("$f",x.ConsultationFee); return new { id=Convert.ToInt64(c.ExecuteScalar()), patientId=x.PatientId }; }
+    public object AddVisit(VisitRequest x) { if (!DoctorAssignmentIsAvailable(x.DoctorId)) throw new InvalidOperationException("The selected doctor is not available today."); using var c=C.CreateCommand(); c.CommandText="INSERT INTO Visits(PatientId,DoctorId,VisitDate,VisitType,Notes,ConsultationFee) VALUES($p,$d,$v,$ty,$n,$f);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$p",x.PatientId); c.Parameters.AddWithValue("$d",x.DoctorId??(object)DBNull.Value); c.Parameters.AddWithValue("$v",string.IsNullOrWhiteSpace(x.VisitDate)?DateTime.Now.ToString("s"):x.VisitDate); c.Parameters.AddWithValue("$ty",string.IsNullOrWhiteSpace(x.VisitType)?"General":x.VisitType.Trim()); c.Parameters.AddWithValue("$n",x.Notes??""); c.Parameters.AddWithValue("$f",x.ConsultationFee); return new { id=Convert.ToInt64(c.ExecuteScalar()), patientId=x.PatientId }; }
     public object Visits(int? patientId) { using var c=C.CreateCommand(); c.CommandText="SELECT v.Id,v.PatientId,v.DoctorId,v.VisitDate,v.VisitType,v.Notes,v.ConsultationFee,p.PatientCode,p.Name,COALESCE(d.Name,'') DoctorName,COALESCE((SELECT SUM(Amount) FROM VisitServices WHERE VisitId=v.Id),0)+v.ConsultationFee Total,COALESCE((SELECT SUM(Amount) FROM Payments WHERE VisitId=v.Id),0) Paid FROM Visits v JOIN Patients p ON p.Id=v.PatientId LEFT JOIN Doctors d ON d.Id=v.DoctorId WHERE ($p IS NULL OR v.PatientId=$p) ORDER BY v.VisitDate DESC"; c.Parameters.AddWithValue("$p",patientId??(object)DBNull.Value); using var r=c.ExecuteReader(); var a=new List<object>(); while(r.Read()) a.Add(new {id=r.GetInt64(0),patientId=r.GetInt64(1),doctorId=r.IsDBNull(2)?(long?)null:r.GetInt64(2),visitDate=r.GetString(3),visitType=r.IsDBNull(4)?"General":r.GetString(4),notes=r.GetString(5),consultationFee=r.GetDecimal(6),patientCode=r.GetString(7),patientName=r.GetString(8),doctorName=r.GetString(9),total=r.GetDecimal(10),paid=r.GetDecimal(11),balance=r.GetDecimal(10)-r.GetDecimal(11)}); return a; }
     public object? Visit(int id) { var all=(List<object>)Visits(null); return all.FirstOrDefault(x => (long)x.GetType().GetProperty("id")!.GetValue(x)! == id); }
     public object AddVisitService(int id,VisitServiceRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO VisitServices(VisitId,ServiceId,Description,Amount) VALUES($v,$s,$d,$a);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$s",x.ServiceId??(object)DBNull.Value); c.Parameters.AddWithValue("$d",x.Description); c.Parameters.AddWithValue("$a",x.Amount); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id}; }

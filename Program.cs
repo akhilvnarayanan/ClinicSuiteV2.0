@@ -188,10 +188,19 @@ app.MapGet("/api/patients/{id:int}", (HttpContext c,int id) => { if(!Auth(c)) re
 app.MapGet("/api/patients/{id:int}/history", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.PatientHistory(id)); });
 app.MapGet("/api/visits", (HttpContext c,int? patientId) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Visits(patientId)); });
 app.MapGet("/api/visits/{id:int}", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); var v=db.Visit(id); return v is null?Results.NotFound():Results.Ok(v); });
-app.MapPost("/api/visits", (HttpContext c, VisitRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.PatientId<=0) return Results.BadRequest(new{message="Patient is required."}); using var db=new Db(dbPath); try{return Results.Ok(db.AddVisit(r));}catch(SqliteException){return Results.BadRequest(new{message="Patient or doctor does not exist."});} });
+app.MapPost("/api/visits", (HttpContext c, VisitRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.PatientId<=0) return Results.BadRequest(new{message="Patient is required."}); using var db=new Db(dbPath); try{return Results.Ok(db.AddVisit(r));}catch(InvalidOperationException ex){return Results.BadRequest(new{message=ex.Message});}catch(SqliteException){return Results.BadRequest(new{message="Patient or doctor does not exist."});} });
 app.MapPost("/api/visits/{id:int}/services", (HttpContext c,int id, VisitServiceRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.Amount<0||string.IsNullOrWhiteSpace(r.Description)) return Results.BadRequest(new{message="Description and non-negative amount are required."}); using var db=new Db(dbPath); return db.Visit(id) is null?Results.NotFound():Results.Ok(db.AddVisitService(id,r)); });
 app.MapPost("/api/visits/{id:int}/payments", (HttpContext c,int id, PaymentRequest r) => { if(!Auth(c)) return Results.Unauthorized(); if(r.Amount<=0) return Results.BadRequest(new{message="Payment must be positive."}); using var db=new Db(dbPath); return db.Visit(id) is null?Results.NotFound():Results.Ok(db.AddPayment(id,r)); });
 app.MapGet("/api/doctors", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Doctors()); });
+app.MapGet("/api/doctors/available", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Doctors(true)); });
+app.MapGet("/api/doctor-availability", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.DoctorAvailability()); });
+app.MapPost("/api/doctor-availability", (HttpContext c, DoctorAvailabilityRequest r) => {
+    if(!Auth(c)) return Results.Unauthorized();
+    if(r.DoctorId<=0) return Results.BadRequest(new { message = "Doctor is required." });
+    using var db=new Db(dbPath);
+    try { db.SetDoctorAvailability(r.DoctorId, r.Available); return Results.Ok(); }
+    catch(InvalidOperationException ex) { return Results.BadRequest(new { message = ex.Message }); }
+});
 app.MapPost("/api/doctors", (HttpContext c, DoctorRequest r) => { if(!Admin(c)) return Results.StatusCode(403); if(string.IsNullOrWhiteSpace(r.Name)||r.ConsultationFee<0) return Results.BadRequest(new{message="Name and a non-negative consultation fee are required."}); using var db=new Db(dbPath); db.AddDoctor(r); return Results.Ok(); });
 app.MapPut("/api/doctors/{id:int}", (HttpContext c, int id, DoctorRequest r) => {
     if (!Admin(c)) return Results.StatusCode(403);
@@ -484,5 +493,6 @@ record ClinicSettings(string ClinicName,string? Address,string? Phone,string? Em
 record InstallConfig(string? DataPath);
 record Session(string Username, string Role, DateTimeOffset Expires);
 record VisitRequest(int PatientId,int? DoctorId,string? VisitDate,string? VisitType,string? Notes,decimal ConsultationFee);
+record DoctorAvailabilityRequest(int DoctorId,bool Available);
 record VisitServiceRequest(int? ServiceId,string Description,decimal Amount);
 record PaymentRequest(decimal Amount,string? Method);

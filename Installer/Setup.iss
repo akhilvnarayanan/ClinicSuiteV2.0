@@ -41,7 +41,9 @@ Filename: "{app}\ImageMagickSetup.exe"; Parameters: "/VERYSILENT /SUPPRESSMSGBOX
 Filename: "{app}\{#MyAppExeName}"; Description: "Launch Clinic Suite"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 [Code]
-var DataPage: TInputDirWizardPage;
+var
+  DataPage: TInputDirWizardPage;
+  DeveloperInfo: TNewStaticText;
 function GetDataDir(Param: String): String;
 begin
   Result := DataPage.Values[0];
@@ -92,6 +94,23 @@ procedure InitializeWizard;
 var
   PreviousDataDir: String;
 begin
+  DeveloperInfo := TNewStaticText.Create(WizardForm);
+  DeveloperInfo.Parent := WizardForm.WelcomePage;
+  DeveloperInfo.Caption :=
+    'Developed by AVN Techsphere' + #13#10 +
+    'Contact: akhilvn@hotmail.com' + #13#10 +
+    'For additional features or customization requests, please contact the developer.';
+  DeveloperInfo.Font.Size := 8;
+  DeveloperInfo.Font.Color := clGray;
+  DeveloperInfo.AutoSize := False;
+  DeveloperInfo.Alignment := taLeftJustify;
+  DeveloperInfo.WordWrap := True;
+  DeveloperInfo.Left := ScaleX(20);
+  DeveloperInfo.Top := WizardForm.WelcomePage.ClientHeight - ScaleY(70);
+  DeveloperInfo.Width := WizardForm.WelcomePage.ClientWidth - ScaleX(40);
+  DeveloperInfo.Height := ScaleY(60);
+  DeveloperInfo.Anchors := [akLeft, akBottom];
+
   DataPage := CreateInputDirPage(wpSelectDir, 'Clinic data location', 'Choose where patient data, database, documents and backups will be stored.', 'This location is preserved during upgrades and is not removed by uninstall.', False, 'ClinicManagementData');
   DataPage.Add('Data folder:');
   PreviousDataDir := ExistingDataDir();

@@ -30,6 +30,7 @@ visit="$(request -H 'Content-Type: application/json' -d "{\"PatientId\":$pid,\"D
 [[ "$(status -X DELETE "$base/api/doctors/$didoctor")" == 409 ]]
 request -H 'Content-Type: application/json' -d '{"Description":"Lab test","Amount":25}' "$base/api/visits/$vid/services" >/dev/null
 request -H 'Content-Type: application/json' -d '{"Amount":30,"Method":"Cash"}' "$base/api/visits/$vid/payments" >/dev/null
+payments="$(request "$base/api/patients/$pid/payments")"; grepq '"amountPaid":30' "$payments"; grepq '"service":"Lab test"' "$payments"; grepq '"paymentDate":' "$payments"
 visits="$(request "$base/api/visits")"; grepq '"total":75' "$visits"; grepq '"balance":45' "$visits"; grepq '"visitType":"Follow-up"' "$visits"; request "$base/api/visits/$vid" >/dev/null
 dashboard="$(request "$base/api/dashboard")"; grepq '"newPatientsThisMonth":' "$dashboard"; grepq '"recentVisits":' "$dashboard"; request "$base/api/reports/daily?date=2025-01-01" >/dev/null
 request -H 'Content-Type: application/json' -d '{"ClinicName":"Integration Clinic","Currency":"INR"}' "$base/api/settings" >/dev/null

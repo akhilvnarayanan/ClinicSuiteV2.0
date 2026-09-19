@@ -62,6 +62,65 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         else MigrateInvoiceTemplate(TemplateDefaults.LegacyInvoiceHtml, TemplateDefaults.InvoiceHtml);
         MigrateInvoiceTemplate(TemplateDefaults.PreviousInvoiceHtml, TemplateDefaults.InvoiceHtml);
         MigrateInvoiceTemplate(TemplateDefaults.PreviousServiceBillInvoiceHtml, TemplateDefaults.InvoiceHtml);
+        SeedKannurDemoData();
+    }
+    void SeedKannurDemoData()
+    {
+        var services = new[]
+        {
+            ("ECG", 250m),
+            ("Blood sugar test", 100m),
+            ("Complete blood count", 350m),
+            ("Dressing", 200m),
+            ("Injection", 150m),
+            ("IV fluid administration", 300m),
+            ("Nebulization", 250m),
+            ("Wound suturing", 500m),
+            ("Urine routine test", 180m),
+            ("Vital signs monitoring", 100m)
+        };
+        foreach (var service in services)
+        {
+            using var c = C.CreateCommand();
+            c.CommandText = @"INSERT INTO Services(Name,Price,Active)
+                              SELECT $name,$price,1
+                              WHERE NOT EXISTS (SELECT 1 FROM Services WHERE Name=$name)";
+            c.Parameters.AddWithValue("$name", service.Item1);
+            c.Parameters.AddWithValue("$price", service.Item2);
+            c.ExecuteNonQuery();
+        }
+
+        if (Scalar<long>("SELECT COUNT(*) FROM Patients WHERE PatientCode LIKE 'DEMO-KNR-%'") > 0) return;
+        var patients = new[]
+        {
+            new DemoPatientSeed("DEMO-KNR-001", "Muhammed Shamil", "Thalassery, Kannur District", "9605001001", "muhammed.shamil.demo@example.com", "1988-04-12", "Male", "O+", "", "Asthma"),
+            new DemoPatientSeed("DEMO-KNR-002", "Fathima Shirin", "Taliparamba, Kannur District", "9605001002", "fathima.shirin.demo@example.com", "1992-09-26", "Female", "A+", "Penicillin", ""),
+            new DemoPatientSeed("DEMO-KNR-003", "Arjun Ramesh", "Payyannur, Kannur District", "9605001003", "arjun.ramesh.demo@example.com", "1979-01-18", "Male", "B+", "", "Diabetes"),
+            new DemoPatientSeed("DEMO-KNR-004", "Anagha Suresh", "Iritty, Kannur District", "9605001004", "anagha.suresh.demo@example.com", "1996-06-05", "Female", "O+", "", ""),
+            new DemoPatientSeed("DEMO-KNR-005", "Niyas Ahammed", "Mattannur, Kannur District", "9605001005", "niyas.ahammed.demo@example.com", "1985-11-22", "Male", "AB+", "", "Hypertension"),
+            new DemoPatientSeed("DEMO-KNR-006", "Devika Prasad", "Kannur Town, Kannur District", "9605001006", "devika.prasad.demo@example.com", "2001-03-30", "Female", "B+", "", ""),
+            new DemoPatientSeed("DEMO-KNR-007", "Sreerag Rajan", "Kuthuparamba, Kannur District", "9605001007", "sreerag.rajan.demo@example.com", "1990-08-14", "Male", "A+", "", ""),
+            new DemoPatientSeed("DEMO-KNR-008", "Aiswarya Manoj", "Panoor, Kannur District", "9605001008", "aiswarya.manoj.demo@example.com", "1998-12-09", "Female", "O+", "Dust allergy", "")
+        };
+        foreach (var patient in patients)
+        {
+            using var c = C.CreateCommand();
+            c.CommandText = @"INSERT OR IGNORE INTO Patients
+                              (PatientCode,Name,Phone,Email,Address,DateOfBirth,Gender,BloodGroup,Allergies,MedicalConditions,CreatedAt)
+                              VALUES($code,$name,$phone,$email,$address,$dob,$gender,$blood,$allergies,$conditions,$created)";
+            c.Parameters.AddWithValue("$code", patient.Code);
+            c.Parameters.AddWithValue("$name", patient.Name);
+            c.Parameters.AddWithValue("$phone", patient.Phone);
+            c.Parameters.AddWithValue("$email", patient.Email);
+            c.Parameters.AddWithValue("$address", patient.Address);
+            c.Parameters.AddWithValue("$dob", patient.DateOfBirth);
+            c.Parameters.AddWithValue("$gender", patient.Gender);
+            c.Parameters.AddWithValue("$blood", patient.BloodGroup);
+            c.Parameters.AddWithValue("$allergies", patient.Allergies);
+            c.Parameters.AddWithValue("$conditions", patient.MedicalConditions);
+            c.Parameters.AddWithValue("$created", DateTime.Now.ToString("s"));
+            c.ExecuteNonQuery();
+        }
     }
     T Scalar<T>(string sql) { using var c = C.CreateCommand(); c.CommandText = sql; return (T)Convert.ChangeType(c.ExecuteScalar()!, typeof(T)); }
     public UserRow? FindUser(string u) { using var c = C.CreateCommand(); c.CommandText = "SELECT Username,PasswordHash,Role FROM Users WHERE Username=$u AND Active=1"; c.Parameters.AddWithValue("$u", u); using var r = c.ExecuteReader(); return r.Read() ? new(r.GetString(0), r.GetString(1), r.GetString(2)) : null; }
@@ -726,6 +785,7 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
     public void Dispose() => C.Dispose();
 }
 
+record DemoPatientSeed(string Code, string Name, string Address, string Phone, string Email, string DateOfBirth, string Gender, string BloodGroup, string Allergies, string MedicalConditions);
 record UserRow(string Username, string PasswordHash, string Role);
 record UserAdminRow(string Username, string Role, bool Active);
 static class PasswordHasher

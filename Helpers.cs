@@ -39,6 +39,7 @@ CREATE TABLE IF NOT EXISTS Visits(Id INTEGER PRIMARY KEY AUTOINCREMENT,PatientId
 CREATE TABLE IF NOT EXISTS VisitServices(Id INTEGER PRIMARY KEY AUTOINCREMENT,VisitId INTEGER NOT NULL,ServiceId INTEGER,Description TEXT NOT NULL,Amount REAL NOT NULL,FOREIGN KEY(VisitId) REFERENCES Visits(Id));
 CREATE TABLE IF NOT EXISTS Payments(Id INTEGER PRIMARY KEY AUTOINCREMENT,VisitId INTEGER NOT NULL,Amount REAL NOT NULL,Method TEXT, PaidAt TEXT NOT NULL,FOREIGN KEY(VisitId) REFERENCES Visits(Id));
 CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,PatientId INTEGER NOT NULL,VisitId INTEGER NOT NULL,FilePath TEXT NOT NULL,OriginalName TEXT,DocumentType TEXT NOT NULL DEFAULT 'Prescription',CreatedAt TEXT NOT NULL,FOREIGN KEY(PatientId) REFERENCES Patients(Id),FOREIGN KEY(VisitId) REFERENCES Visits(Id));
+ CREATE TABLE IF NOT EXISTS PatientDocuments(Id INTEGER PRIMARY KEY AUTOINCREMENT,PatientId INTEGER NOT NULL,FilePath TEXT NOT NULL,OriginalName TEXT,DocumentType TEXT NOT NULL DEFAULT 'Patient document',CreatedAt TEXT NOT NULL,FOREIGN KEY(PatientId) REFERENCES Patients(Id));
  CREATE TABLE IF NOT EXISTS ClinicSettings(Id INTEGER PRIMARY KEY CHECK(Id=1),ClinicName TEXT NOT NULL,Address TEXT,Phone TEXT,Email TEXT,Website TEXT,RegistrationNo TEXT,TaxNo TEXT,Currency TEXT NOT NULL DEFAULT 'SGD',LogoPath TEXT,Footer TEXT,ManualBackupPath TEXT,BackupPath TEXT,BackupSchedule TEXT NOT NULL DEFAULT 'Off',BackupTime TEXT NOT NULL DEFAULT '02:00',BackupDay TEXT NOT NULL DEFAULT 'Monday',LastScheduledBackup TEXT);";
         cmd.ExecuteNonQuery();
         AddColumnIfMissing("Patients", "BloodGroup", "TEXT");
@@ -108,6 +109,47 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
     public object AddPayment(int id,PaymentRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO Payments(VisitId,Amount,Method,PaidAt) VALUES($v,$a,$m,$t);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$a",x.Amount); c.Parameters.AddWithValue("$m",x.Method??""); c.Parameters.AddWithValue("$t",DateTime.Now.ToString("s")); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id,amount=x.Amount}; }
     public object PatientHistory(int id) => Visits(id);
     public object Documents(int patientId,int visitId) { using var c=C.CreateCommand(); c.CommandText="SELECT Id id,OriginalName name,FilePath path,CreatedAt createdAt FROM Documents WHERE PatientId=$p AND VisitId=$v ORDER BY Id DESC"; c.Parameters.AddWithValue("$p",patientId); c.Parameters.AddWithValue("$v",visitId); using var r=c.ExecuteReader(); var list=new List<Dictionary<string,object?>>(); while(r.Read()){var d=new Dictionary<string,object?>();for(int i=0;i<r.FieldCount;i++)d[r.GetName(i)]=r.IsDBNull(i)?null:r.GetValue(i);list.Add(d);} return list; }
+    public object PatientDocuments(int patientId)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = @"SELECT Id,OriginalName,CreatedAt,VisitId,0 AS PatientLevel FROM Documents WHERE PatientId=$p
+                          UNION ALL
+                          SELECT Id,OriginalName,CreatedAt,NULL AS VisitId,1 AS PatientLevel FROM PatientDocuments WHERE PatientId=$p
+                          ORDER BY CreatedAt DESC, Id DESC";
+        c.Parameters.AddWithValue("$p", patientId);
+        using var r = c.ExecuteReader();
+        var list = new List<object>();
+        while (r.Read())
+        {
+            list.Add(new
+            {
+                id = r.GetInt64(0),
+                name = r.IsDBNull(1) ? "Document" : r.GetString(1),
+                createdAt = r.GetString(2),
+                visitId = r.IsDBNull(3) ? (long?)null : r.GetInt64(3),
+                patientLevel = r.GetInt64(4) == 1
+            });
+        }
+        return list;
+    }
+    public long AddPatientDocument(int patientId, string path, string original)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = "INSERT INTO PatientDocuments(PatientId,FilePath,OriginalName,CreatedAt) VALUES($p,$f,$o,$t);SELECT last_insert_rowid();";
+        c.Parameters.AddWithValue("$p", patientId);
+        c.Parameters.AddWithValue("$f", path);
+        c.Parameters.AddWithValue("$o", original);
+        c.Parameters.AddWithValue("$t", DateTime.Now.ToString("s"));
+        return Convert.ToInt64(c.ExecuteScalar());
+    }
+    public (string Path,string Name)? PatientDocument(int id)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = "SELECT FilePath,COALESCE(OriginalName,'document') FROM PatientDocuments WHERE Id=$i";
+        c.Parameters.AddWithValue("$i", id);
+        using var r = c.ExecuteReader();
+        return r.Read() ? (r.GetString(0), r.GetString(1)) : null;
+    }
     public void BackupTo(string destinationPath)
     {
         if (File.Exists(destinationPath)) File.Delete(destinationPath);

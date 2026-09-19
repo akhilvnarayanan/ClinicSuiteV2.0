@@ -385,6 +385,42 @@ app.MapGet("/api/documents/{id:int}/download", (HttpContext c,int id) => {
         ? Results.File(fullPath, "application/octet-stream", d.Value.Name)
         : Results.NotFound();
 });
+app.MapPost("/api/patient-documents/{patientId:int}", async (HttpContext c, int patientId, IFormFile file) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    if (file.Length == 0 || file.Length > 10 * 1024 * 1024)
+        return Results.BadRequest(new { message = "Choose a file smaller than 10 MB." });
+
+    using var db = new Db(dbPath);
+    var patient = db.GetPatient(patientId);
+    if (patient is null) return Results.NotFound();
+
+    var ext = Path.GetExtension(file.FileName);
+    if (string.IsNullOrWhiteSpace(ext) || ext.Length > 10 || ext.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        ext = ".bin";
+
+    var folder = Path.Combine(dataRoot, "Documents", "Patients", db.GetPatientCode(patientId));
+    Directory.CreateDirectory(folder);
+    var path = Path.Combine(folder, $"{DateTime.Now:yyyy-MM-dd}_PatientDocument_{Guid.NewGuid():N}{ext}");
+    await using (var stream = File.Create(path)) await file.CopyToAsync(stream);
+    var id = db.AddPatientDocument(patientId, Path.GetRelativePath(dataRoot, path), file.FileName);
+    return Results.Ok(new { id, path });
+});
+app.MapGet("/api/patient-documents/{patientId:int}", (HttpContext c, int patientId) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    using var db = new Db(dbPath);
+    return db.GetPatient(patientId) is null ? Results.NotFound() : Results.Ok(db.PatientDocuments(patientId));
+});
+app.MapGet("/api/patient-documents/{id:int}/download", (HttpContext c, int id) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    using var db = new Db(dbPath);
+    var d = db.PatientDocument(id);
+    if (d is null) return Results.NotFound();
+    var fullPath = Path.GetFullPath(Path.Combine(dataRoot, d.Value.Path));
+    var safeRoot = Path.GetFullPath(dataRoot) + Path.DirectorySeparatorChar;
+    return fullPath.StartsWith(safeRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath)
+        ? Results.File(fullPath, "application/octet-stream", d.Value.Name)
+        : Results.NotFound();
+});
 app.MapGet("/api/reports/daily", (HttpContext c,string? date) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.DailyReport(date)); });
 
 _ = Task.Run(async () => {

@@ -476,7 +476,7 @@ app.Run();
 
 record LoginRequest(string Username,string Password);
 record PatientRequest(string Name,string? Phone,string? Email,string? Address,string? DateOfBirth,string? Gender,string? BloodGroup,string? Allergies,string? MedicalConditions);
-record DoctorRequest(string Name,string? Specialization,string? Phone,decimal ConsultationFee,bool Active = true);
+record DoctorRequest(string Name,string? Specialization,string? Phone,decimal ConsultationFee,bool Active = true,string? RegistrationNo = null);
 record ServiceRequest(string Name,decimal Price,bool Active = true);
 record UserRequest(string Username,string Password,string Role);
 record UserUpdateRequest(string Username,string Role,bool Active,string? Password);

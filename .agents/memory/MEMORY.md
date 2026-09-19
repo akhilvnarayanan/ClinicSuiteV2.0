@@ -2,3 +2,4 @@
 - [Invoice template rendering](invoice-template-rendering.md) — Invoice templates may be full HTML documents or fragments; print full documents directly and unwrap them for in-app display.
 - [.NET 7 language compatibility](dotnet7-language-compatibility.md) — Keep syntax compatible with the project’s .NET 7/C# compiler; newer collection literals do not build.
 - [Runtime-specific .NET restore](dotnet-runtime-restore.md) — Restore the target runtime graph before using no-restore publish commands.
+- [Inno Setup file string types](inno-setup-ansi-string.md) — Inno Setup 6.7 LoadStringFromFile requires an AnsiString output variable.

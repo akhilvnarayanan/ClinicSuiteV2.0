@@ -49,7 +49,8 @@ end;
 
 function ExistingDataDir(): String;
 var
-  ConfigFile, Contents, Marker, Value: String;
+  ConfigFile, Marker, Value: String;
+  Contents: AnsiString;
   StartPos, EndPos: Integer;
 begin
   Result := '';

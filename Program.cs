@@ -374,6 +374,17 @@ app.MapPost("/api/documents/{patientId:int}/{visitId:int}", async (HttpContext c
     return Results.Ok(new{path});
 });
 app.MapGet("/api/documents/{patientId:int}/{visitId:int}", (HttpContext c,int patientId,int visitId) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return !db.VisitBelongsToPatient(visitId,patientId)?Results.NotFound():Results.Ok(db.Documents(patientId,visitId)); });
+app.MapGet("/api/documents/{id:int}/view", (HttpContext c,int id) => {
+    if(!Auth(c)) return Results.Unauthorized();
+    using var db=new Db(dbPath);
+    var d=db.Document(id);
+    if(d is null) return Results.NotFound();
+    var fullPath=Path.GetFullPath(Path.Combine(dataRoot,d.Value.Path));
+    var safeRoot=Path.GetFullPath(dataRoot)+Path.DirectorySeparatorChar;
+    return fullPath.StartsWith(safeRoot,StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath)
+        ? Results.File(fullPath,"application/pdf",enableRangeProcessing:true)
+        : Results.NotFound();
+});
 app.MapGet("/api/documents/{id:int}/download", (HttpContext c,int id) => {
     if(!Auth(c)) return Results.Unauthorized();
     using var db=new Db(dbPath);
@@ -394,21 +405,43 @@ app.MapPost("/api/patient-documents/{patientId:int}", async (HttpContext c, int 
     var patient = db.GetPatient(patientId);
     if (patient is null) return Results.NotFound();
 
-    var ext = Path.GetExtension(file.FileName);
-    if (string.IsNullOrWhiteSpace(ext) || ext.Length > 10 || ext.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-        ext = ".bin";
-
     var folder = Path.Combine(dataRoot, "Documents", "Patients", db.GetPatientCode(patientId));
     Directory.CreateDirectory(folder);
-    var path = Path.Combine(folder, $"{DateTime.Now:yyyy-MM-dd}_PatientDocument_{Guid.NewGuid():N}{ext}");
-    await using (var stream = File.Create(path)) await file.CopyToAsync(stream);
-    var id = db.AddPatientDocument(patientId, Path.GetRelativePath(dataRoot, path), file.FileName);
+    var path = Path.Combine(folder, $"{DateTime.Now:yyyy-MM-dd}_PatientDocument_{Guid.NewGuid():N}.pdf");
+    try
+    {
+        await DocumentFiles.SaveAsPdfAsync(file, path);
+    }
+    catch (InvalidDataException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Problem(ex.Message, statusCode: 503);
+    }
+
+    var originalName = Path.GetFileName(file.FileName);
+    if (DocumentFiles.IsImage(Path.GetExtension(originalName)))
+        originalName = Path.GetFileNameWithoutExtension(originalName) + ".pdf";
+    var id = db.AddPatientDocument(patientId, Path.GetRelativePath(dataRoot, path), originalName);
     return Results.Ok(new { id, path });
 });
 app.MapGet("/api/patient-documents/{patientId:int}", (HttpContext c, int patientId) => {
     if (!Auth(c)) return Results.Unauthorized();
     using var db = new Db(dbPath);
     return db.GetPatient(patientId) is null ? Results.NotFound() : Results.Ok(db.PatientDocuments(patientId));
+});
+app.MapGet("/api/patient-documents/{id:int}/view", (HttpContext c, int id) => {
+    if (!Auth(c)) return Results.Unauthorized();
+    using var db = new Db(dbPath);
+    var d = db.PatientDocument(id);
+    if (d is null) return Results.NotFound();
+    var fullPath = Path.GetFullPath(Path.Combine(dataRoot, d.Value.Path));
+    var safeRoot = Path.GetFullPath(dataRoot) + Path.DirectorySeparatorChar;
+    return fullPath.StartsWith(safeRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath)
+        ? Results.File(fullPath, "application/pdf", enableRangeProcessing: true)
+        : Results.NotFound();
 });
 app.MapGet("/api/patient-documents/{id:int}/download", (HttpContext c, int id) => {
     if (!Auth(c)) return Results.Unauthorized();
@@ -418,7 +451,7 @@ app.MapGet("/api/patient-documents/{id:int}/download", (HttpContext c, int id) =
     var fullPath = Path.GetFullPath(Path.Combine(dataRoot, d.Value.Path));
     var safeRoot = Path.GetFullPath(dataRoot) + Path.DirectorySeparatorChar;
     return fullPath.StartsWith(safeRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(fullPath)
-        ? Results.File(fullPath, "application/octet-stream", d.Value.Name)
+        ? Results.File(fullPath, "application/pdf", d.Value.Name.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ? d.Value.Name : d.Value.Name + ".pdf")
         : Results.NotFound();
 });
 app.MapGet("/api/reports/daily", (HttpContext c,string? date) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.DailyReport(date)); });

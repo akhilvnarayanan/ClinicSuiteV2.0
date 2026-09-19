@@ -1,0 +1,192 @@
+Fix the billing/invoice logic based on the original requirement. Do not change unrelated GUI or functionality.
+
+IMPORTANT BUSINESS RULE:
+The invoice/bill generated from the Billing/Charges workflow is ONLY for additional services/charges.
+
+The consultation fee must NEVER be included in this invoice.
+
+Examples:
+- Consultation = ₹500
+- Stitching = ₹300
+- Dressing = ₹200
+
+The service invoice should contain:
+Stitching ₹300
+Dressing ₹200
+Total ₹500
+
+It must NOT contain the ₹500 consultation charge.
+
+Also fix the current charge-management workflow.
+
+CURRENT PROBLEM:
+When the user adds a service charge to a patient, the charge is added immediately, but there is currently no convenient option to edit or remove that charge before generating the invoice.
+
+REQUIRED WORKFLOW:
+
+1. Add Charge
+- User selects a service from the available Services list.
+- The default service price is loaded automatically.
+- User can modify the amount for that particular patient.
+- User can add multiple services/charges before generating the invoice.
+- Custom services must also be supported.
+
+2. Review Charges Before Invoice
+After charges are added, display a clear list of all pending service charges that will be included in the invoice.
+
+For each charge show:
+- Service name
+- Quantity, if supported
+- Unit price/amount
+- Total
+- Edit action
+- Delete/Remove action
+
+3. Edit Charge
+The user must be able to modify an added charge before the invoice is generated.
+
+Allow modification of:
+- Service
+- Description/name for custom service
+- Amount
+- Quantity, if supported
+
+When editing a standard service, the user should still be able to override the default price for this patient.
+
+4. Remove Charge
+Provide a Delete/Remove button for each pending service charge.
+
+When removed:
+- It must no longer appear in the pending invoice.
+- It must not be included in the invoice total.
+- It must not affect the patient's outstanding service balance.
+- The user should be able to continue adding another service.
+
+5. Invoice Preview / Final Review
+Before generating/printing the invoice, provide a review step showing exactly what will be billed.
+
+The preview must contain ONLY pending additional services.
+
+Do NOT include:
+- Consultation fee
+- Consultation charge
+- Consultation payment
+- Any other consultation-related amount
+
+The user should be able to:
+- Edit a charge
+- Remove a charge
+- Add another service
+- Review the total
+- Generate the final invoice
+
+6. Pending Service Logic
+The invoice should be generated only for services that are still pending/unpaid.
+
+If a service has already been fully paid:
+- Do not include it in a new invoice.
+
+If a service is partially paid:
+- Show only the remaining payable amount according to the existing application's payment logic.
+
+If there are no pending additional services:
+- Do not generate an empty service invoice.
+- Show a clear message such as:
+  "No pending services available for billing."
+
+7. Consultation Separation
+Review the backend and frontend carefully and find where consultation charges are currently being mixed into the invoice/service billing calculation.
+
+Separate the two concepts:
+
+CONSULTATION
+- consultation fee
+- consultation payment
+- consultation-related records
+
+ADDITIONAL SERVICES
+- service charges
+- service payments
+- pending service balance
+- service invoice
+
+The service invoice must use ONLY the additional-service records.
+
+Do not simply hide consultation from the UI. Fix the underlying calculation/query/business logic so consultation cannot accidentally enter the service invoice through another code path.
+
+8. Existing Data
+Do not delete or alter existing patient, visit, consultation, service, payment, or invoice records unnecessarily.
+
+Make the change backward-compatible with the existing SQLite database.
+
+9. Verify All Calculation Paths
+Trace the complete flow:
+
+Patient
+→ Visit
+→ Consultation
+→ Additional Service
+→ Charge
+→ Payment
+→ Pending Balance
+→ Invoice
+
+Verify that consultation and additional services remain separate at every stage.
+
+Test at least these scenarios:
+
+Test 1:
+Consultation only
+→ No service invoice should be generated.
+
+Test 2:
+Consultation + one service
+→ Invoice contains only the service.
+
+Test 3:
+Consultation + multiple services
+→ Invoice contains only the services.
+
+Test 4:
+Add service → edit amount → generate invoice
+→ Invoice uses the edited amount.
+
+Test 5:
+Add multiple services → remove one → generate invoice
+→ Removed service is not included.
+
+Test 6:
+Add service → remove it → add another service
+→ Only the final pending service appears.
+
+Test 7:
+Service already fully paid
+→ It does not appear in a new invoice.
+
+Test 8:
+Partially paid service
+→ Only the remaining payable amount is billed according to the existing payment logic.
+
+Test 9:
+No pending services
+→ Invoice generation is blocked with a clear message.
+
+IMPORTANT:
+Before changing the code, trace the existing billing, charge, payment and invoice implementation and identify exactly where the consultation amount is being included.
+
+Do not redesign the GUI. Keep the existing visual style and layout, but add the necessary Edit, Remove and Review functionality in a clean way.
+
+After implementation:
+- Run the existing integration tests.
+- Add/update tests for the above scenarios.
+- Check both frontend and backend.
+- Check invoice totals.
+- Check database records after edit/delete.
+- Confirm that deleting a pending charge does not accidentally delete the underlying service definition.
+- Confirm that editing a patient-specific charge does not modify the default price of the service in the Services configuration.
+
+Finally, report:
+1. Where the consultation amount was incorrectly entering the invoice calculation.
+2. What was changed.
+3. How edit/remove works.
+4. Which tests were performed and their results.

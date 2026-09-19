@@ -169,6 +169,64 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
     public void AddDocument(int p, int v, string path, string original) { using var c = C.CreateCommand(); c.CommandText = "INSERT INTO Documents(PatientId,VisitId,FilePath,OriginalName,CreatedAt) VALUES($p,$v,$f,$o,$t)"; c.Parameters.AddWithValue("$p", p); c.Parameters.AddWithValue("$v", v); c.Parameters.AddWithValue("$f", path); c.Parameters.AddWithValue("$o", original); c.Parameters.AddWithValue("$t", DateTime.Now.ToString("s")); c.ExecuteNonQuery(); }
     public object AddVisit(VisitRequest x) { if (!DoctorAssignmentIsAvailable(x.DoctorId)) throw new InvalidOperationException("The selected doctor is not available today."); using var c=C.CreateCommand(); c.CommandText="INSERT INTO Visits(PatientId,DoctorId,VisitDate,VisitType,Notes,ConsultationFee) VALUES($p,$d,$v,$ty,$n,$f);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$p",x.PatientId); c.Parameters.AddWithValue("$d",x.DoctorId??(object)DBNull.Value); c.Parameters.AddWithValue("$v",string.IsNullOrWhiteSpace(x.VisitDate)?DateTime.Now.ToString("s"):x.VisitDate); c.Parameters.AddWithValue("$ty",string.IsNullOrWhiteSpace(x.VisitType)?"General":x.VisitType.Trim()); c.Parameters.AddWithValue("$n",x.Notes??""); c.Parameters.AddWithValue("$f",x.ConsultationFee); return new { id=Convert.ToInt64(c.ExecuteScalar()), patientId=x.PatientId }; }
     public object Visits(int? patientId) { using var c=C.CreateCommand(); c.CommandText="SELECT v.Id,v.PatientId,v.DoctorId,v.VisitDate,v.VisitType,v.Notes,v.ConsultationFee,p.PatientCode,p.Name,COALESCE(d.Name,'') DoctorName,COALESCE((SELECT SUM(Amount) FROM VisitServices WHERE VisitId=v.Id),0)+v.ConsultationFee Total,COALESCE((SELECT SUM(Amount) FROM Payments WHERE VisitId=v.Id),0) Paid FROM Visits v JOIN Patients p ON p.Id=v.PatientId LEFT JOIN Doctors d ON d.Id=v.DoctorId WHERE ($p IS NULL OR v.PatientId=$p) ORDER BY v.VisitDate DESC"; c.Parameters.AddWithValue("$p",patientId??(object)DBNull.Value); using var r=c.ExecuteReader(); var a=new List<object>(); while(r.Read()) a.Add(new {id=r.GetInt64(0),patientId=r.GetInt64(1),doctorId=r.IsDBNull(2)?(long?)null:r.GetInt64(2),visitDate=r.GetString(3),visitType=r.IsDBNull(4)?"General":r.GetString(4),notes=r.GetString(5),consultationFee=r.GetDecimal(6),patientCode=r.GetString(7),patientName=r.GetString(8),doctorName=r.GetString(9),total=r.GetDecimal(10),paid=r.GetDecimal(11),balance=r.GetDecimal(10)-r.GetDecimal(11)}); return a; }
+    public object? PrescriptionContext(int visitId)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = @"SELECT v.Id,v.VisitDate,v.VisitType,
+                                 p.PatientCode,p.Name,p.DateOfBirth,p.Gender,
+                                 COALESCE(d.Name,''),COALESCE(d.Specialization,''),
+                                 COALESCE(d.RegistrationNo,''),COALESCE(d.Phone,''),
+                                 cs.ClinicName,COALESCE(cs.ClinicType,''),COALESCE(cs.Address,''),
+                                 COALESCE(cs.Phone,''),COALESCE(cs.Email,''),
+                                 COALESCE(cs.LogoPath,''),v.PatientId
+                          FROM Visits v
+                          JOIN Patients p ON p.Id=v.PatientId
+                          LEFT JOIN Doctors d ON d.Id=v.DoctorId
+                          JOIN ClinicSettings cs ON cs.Id=1
+                          WHERE v.Id=$v";
+        c.Parameters.AddWithValue("$v", visitId);
+        using var r = c.ExecuteReader();
+        if (!r.Read()) return null;
+
+        var visitDate = r.GetString(1);
+        var parsedVisitDate = DateTime.TryParse(visitDate, out var parsed)
+            ? parsed.Date
+            : (DateTime?)null;
+        return new
+        {
+            clinic = new
+            {
+                name = r.GetString(11),
+                type = r.GetString(12),
+                address = r.GetString(13),
+                phone = r.GetString(14),
+                email = r.GetString(15),
+                logoPath = r.GetString(16)
+            },
+            patient = new
+            {
+                id = r.GetInt64(17),
+                patientCode = r.GetString(3),
+                name = r.GetString(4),
+                dateOfBirth = r.IsDBNull(5) ? "" : r.GetString(5),
+                gender = r.IsDBNull(6) ? "" : r.GetString(6)
+            },
+            visit = new
+            {
+                id = r.GetInt64(0),
+                date = visitDate,
+                dateOnly = parsedVisitDate?.ToString("yyyy-MM-dd") ?? visitDate.Split('T')[0],
+                validTill = parsedVisitDate?.AddDays(6).ToString("yyyy-MM-dd") ?? ""
+            },
+            doctor = new
+            {
+                name = r.GetString(7),
+                specialization = r.GetString(8),
+                registrationNo = r.GetString(9),
+                phone = r.GetString(10)
+            }
+        };
+    }
     public object? Visit(int id) { var all=(List<object>)Visits(null); return all.FirstOrDefault(x => (long)x.GetType().GetProperty("id")!.GetValue(x)! == id); }
     public object AddVisitService(int id,VisitServiceRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO VisitServices(VisitId,ServiceId,Description,Amount) VALUES($v,$s,$d,$a);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$s",x.ServiceId??(object)DBNull.Value); c.Parameters.AddWithValue("$d",x.Description); c.Parameters.AddWithValue("$a",x.Amount); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id}; }
     public object AddPayment(int id,PaymentRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO Payments(VisitId,Amount,Method,PaidAt) VALUES($v,$a,$m,$t);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$a",x.Amount); c.Parameters.AddWithValue("$m",x.Method??""); c.Parameters.AddWithValue("$t",DateTime.Now.ToString("s")); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id,amount=x.Amount}; }

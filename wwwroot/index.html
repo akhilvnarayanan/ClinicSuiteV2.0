@@ -335,7 +335,66 @@ async function browseFolder(inputId,msgId){let m=$(msgId);m.innerHTML='<p class=
  async function backup(){let[s,d]=await Promise.all([api('/api/settings'),api('/api/data-location')]);currentSettings=s;$('content').innerHTML=`<div class="welcome"><div><span class="eyebrow">Administration</span><h2>Backup</h2><p class="muted">Create a database backup now or configure automatic database backups.</p></div></div><div class="panel"><h3>Manual Database Backup</h3><p class="muted">Create a ZIP containing only a consistent copy of the clinic database.</p><div class="backup-path-row"><label class="field">Backup destination<input id="manualBackupPath" value="${esc(s.manualBackupPath)}" placeholder="${esc(d.path)}/Backups/Manual"></label><button type="button" class="btn alt" onclick="browseFolder('manualBackupPath','backupManualMsg')">Browse Folder</button></div><div id="backupManualMsg" aria-live="polite"></div><div class="form-actions"><button type="button" class="btn" onclick="createDatabaseBackup()">Create Database Backup</button></div></div><div class="panel"><h3>Scheduled Database Backup</h3><p class="muted">Scheduled backups run on the server even when this browser is closed. Each archive contains only the clinic database.</p><div class="backup-path-row"><label class="field">Backup destination<input id="backupPath" value="${esc(s.backupPath)}" placeholder="${esc(d.path)}/Backups/Scheduled"></label><button type="button" class="btn alt" onclick="browseFolder('backupPath','backupScheduledMsg')">Browse Folder</button></div><div class="row"><label class="field">Schedule<select id="backupSchedule"><option value="Off" ${s.backupSchedule==='Off'?'selected':''}>Off</option><option value="Daily" ${s.backupSchedule==='Daily'?'selected':''}>Daily</option><option value="Weekly" ${s.backupSchedule==='Weekly'?'selected':''}>Weekly</option></select></label><label class="field">Local backup time<input id="backupTime" type="time" value="${esc(s.backupTime||'02:00')}"></label><label class="field">Weekly day<select id="backupDay">${['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].map(x=>`<option ${s.backupDay===x?'selected':''}>${x}</option>`).join('')}</select></label></div><div id="backupScheduledMsg" aria-live="polite"></div><div class="form-actions"><button type="button" class="btn" onclick="saveBackupSettings()">Save Backup Settings</button></div></div><div class="panel"><h3>Database backup status</h3><p class="muted">Database <b>${esc(d.db)}</b><br>Manual destination <b>${esc(s.manualBackupPath||d.path+'/Backups/Manual')}</b><br>Scheduled destination <b>${esc(s.backupPath||d.path+'/Backups/Scheduled')}</b><br>Last scheduled backup <b>${esc(s.lastScheduledBackup||'Not yet run')}</b></p></div>`}
   async function saveBackupSettings(){let b=document.querySelector('[onclick="saveBackupSettings()"]');if(b){b.disabled=true;b.textContent='Saving…'}try{let s=currentSettings||{};await api('/api/settings',json('POST',{ClinicName:s.clinicName||'',ClinicType:s.clinicType||'',Address:s.address||'',Phone:s.phone||'',Email:s.email||'',Website:s.website||'',RegistrationNo:s.registrationNo||'',TaxNo:s.taxNo||'',Currency:s.currency||'SGD',LogoPath:s.logoPath||'',Footer:s.footer||'',ManualBackupPath:$('manualBackupPath').value.trim(),BackupPath:$('backupPath').value.trim(),BackupSchedule:$('backupSchedule').value,BackupTime:$('backupTime').value,BackupDay:$('backupDay').value}));currentSettings=await api('/api/settings');$('backupScheduledMsg').innerHTML='<p class="notice">Backup settings saved successfully.</p>'}catch(x){$('backupScheduledMsg').innerHTML=`<p class="error">${esc(x.message)}</p>`}finally{if(b){b.disabled=false;b.textContent='Save Backup Settings'}}}
   async function createDatabaseBackup(){try{let s=currentSettings||await api('/api/settings');await api('/api/settings',json('POST',{ClinicName:s.clinicName||'',ClinicType:s.clinicType||'',Address:s.address||'',Phone:s.phone||'',Email:s.email||'',Website:s.website||'',RegistrationNo:s.registrationNo||'',TaxNo:s.taxNo||'',Currency:s.currency||'SGD',LogoPath:s.logoPath||'',Footer:s.footer||'',ManualBackupPath:$('manualBackupPath').value.trim(),BackupPath:s.backupPath||'',BackupSchedule:s.backupSchedule||'Off',BackupTime:s.backupTime||'02:00',BackupDay:s.backupDay||'Monday'}));let r=await api('/api/backup',{method:'POST'});$('backupManualMsg').innerHTML=`<p class="notice">Database backup created: ${esc(r.file)}</p>`}catch(x){$('backupManualMsg').innerHTML=`<p class="error">${esc(x.message)}</p>`}}
-function printPage(){window.print()}function printPrescription(){let w=window.open('','_blank');w.document.write(`<title>Blank prescription · ${esc(clinic.clinicName)}</title><style>body{font:14px system-ui;color:#22343b;padding:35px}h1{font:26px Georgia;border-bottom:2px solid #0d6b6a;padding-bottom:12px}hr{border:0;border-top:1px solid #dce7e2;margin:28px 0}.line{height:38px;border-bottom:1px solid #9ba9a7}small{color:#71858a}</style><h1>${esc(clinic.clinicName)}</h1><small>BLANK PRESCRIPTION</small><p>Patient name: ____________________________________</p><p>Date: ____________________</p><hr><div class="line"></div><div class="line"></div><div class="line"></div><div class="line"></div><hr><p>Doctor signature: _________________________________</p>`);w.document.close();w.print()}
+ function printPage(){window.print()}
+ function prescriptionDate(value){let s=String(value||'').slice(0,10),parts=s.split('-');return parts.length===3&&parts[0].length===4?`${parts[2]}/${parts[1]}/${parts[0]}`:s}
+ function prescriptionAge(dateOfBirth,onDate){if(!dateOfBirth)return'';let birth=new Date(`${String(dateOfBirth).slice(0,10)}T00:00:00`),at=new Date(`${String(onDate||'').slice(0,10)}T00:00:00`);if(Number.isNaN(birth.getTime())||Number.isNaN(at.getTime()))return'';let age=at.getFullYear()-birth.getFullYear(),birthday=new Date(at.getFullYear(),birth.getMonth(),birth.getDate());if(at<birthday)age--;return age>=0?String(age):''}
+ async function printPrescription(){
+     let w=window.open('','_blank');
+     if(!w){fail(new Error('Allow pop-ups to print the prescription.'));return}
+     try{
+         let d=await api(`/api/visits/${currentVisit.id}/prescription`),c=d.clinic||{},p=d.patient||{},v=d.visit||{},doc=d.doctor||{};
+         let logoPath=(c.logoPath||'').trim(),logoSrc=logoPath?(logoPath.startsWith('/api/clinic-logo/file')?`${logoPath}?v=${Date.now()}`:logoPath):'';
+         let logo=logoSrc?`<img class="clinic-logo" src="${esc(logoSrc)}" alt="${esc(c.name||'Clinic')} logo">`:'';
+         let phone=c.phone?`<div class="contact-line"><span class="contact-icon">⌕</span>${esc(c.phone)}</div>`:'';
+         let email=c.email?`<div class="contact-line"><span class="contact-icon">✉</span>${esc(c.email)}</div>`:'';
+         let doctorName=(doc.name||'').trim(),doctorHeading=doctorName?`DR. ${esc(doctorName.toUpperCase())}`:'DOCTOR';
+         let doctorSpecialization=doc.specialization?`<div>${esc(doc.specialization)}</div>`:'';
+         let doctorRegistration=doc.registrationNo?`<div>Reg No: ${esc(doc.registrationNo)}</div>`:'';
+         let age=prescriptionAge(p.dateOfBirth,v.dateOnly);
+         let html=`<!doctype html><html><head><meta charset="utf-8"><title>Prescription · ${esc(p.name||c.name||'Clinic')}</title><style>
+ @page{size:A5 portrait;margin:0}
+ *{box-sizing:border-box}
+ html,body{margin:0;background:#eef1f0;color:#171b1d;font-family:Arial,Helvetica,sans-serif}
+ body{font-size:10.5pt}
+ .sheet{width:148mm;min-height:210mm;margin:0 auto;padding:8.5mm 10.5mm 7mm;background:#fff;display:flex;flex-direction:column}
+ .letterhead{display:flex;align-items:flex-start;gap:5mm;min-height:29mm}
+ .clinic-logo{width:27mm;height:27mm;object-fit:contain;flex:none}
+ .clinic-copy{padding-top:.5mm;min-width:0}
+ .clinic-name{margin:0;color:#2c7eb9;font-size:24pt;line-height:1.02;font-weight:800;letter-spacing:.4px;text-transform:uppercase;white-space:nowrap}
+ .clinic-type{margin-top:1.5mm;font-size:12.5pt;line-height:1.1;font-weight:700}
+ .clinic-address{margin-top:1.5mm;font-size:10.5pt;line-height:1.15}
+ .contact-line{font-size:10.5pt;line-height:1.15;margin-top:1.2mm}
+ .contact-icon{display:inline-block;width:6mm;font-size:12pt;font-weight:700}
+ .rule{border:0;border-top:.45mm solid #1d2528;margin:3.2mm 0 2.5mm}
+ .patient-grid{display:grid;gap:2.2mm 3mm;font-size:11pt;font-weight:700;line-height:1.15}
+ .patient-grid.top{grid-template-columns:1.05fr .78fr 1.1fr}
+ .patient-grid.bottom{grid-template-columns:1.55fr .45fr .72fr;margin-top:2.5mm}
+ .patient-grid span{white-space:nowrap}
+ .doctor-rule{margin-top:3.2mm;margin-bottom:4mm}
+ .clinical-info{display:grid;grid-template-columns:1fr .58fr;gap:8mm;min-height:35mm}
+ .doctor-heading{font-size:13pt;line-height:1.2;font-weight:800;text-transform:uppercase}
+ .doctor-details{margin-top:2.3mm;font-size:11pt;line-height:1.4}
+ .vitals-title{font-size:13pt;line-height:1.2;font-weight:800;text-decoration:underline}
+ .vitals{margin-top:3.8mm;font-size:11pt;line-height:1.75}
+ .vital-row{display:flex;gap:2mm;white-space:nowrap}
+ .vital-line{display:inline-block;min-width:18mm;border-bottom:.25mm solid transparent}
+ .rx-space{flex:1;min-height:112mm}
+ @media screen{body{padding:14px}.sheet{box-shadow:0 2px 14px #173e3928}}
+ </style></head><body><main class="sheet">
+ <header class="letterhead">${logo}<div class="clinic-copy"><h1 class="clinic-name">${esc(c.name||'')}</h1>${c.type?`<div class="clinic-type">${esc(c.type)}</div>`:''}${c.address?`<div class="clinic-address">${esc(c.address)}</div>`:''}${phone}${email}</div></header>
+ <hr class="rule">
+ <section class="patient-grid top"><span>Patient ID: ${esc(p.patientCode||'')}</span><span>Date: ${prescriptionDate(v.dateOnly)}</span><span>Valid Till: ${prescriptionDate(v.validTill)}</span></section>
+ <section class="patient-grid bottom"><span>Name: ${esc(p.name||'')}</span><span>Age: ${esc(age)}</span><span>Gender: ${esc(p.gender||'')}</span></section>
+ <hr class="rule doctor-rule">
+ <section class="clinical-info"><div><div class="doctor-heading">${doctorHeading}</div><div class="doctor-details">${doctorSpecialization}${doctorRegistration}</div></div><div><div class="vitals-title">VITALS</div><div class="vitals"><div class="vital-row">BP:</div><div class="vital-row">Temp:</div><div class="vital-row">Pulse:</div><div class="vital-row">SpO₂:</div><div class="vital-row">Weight:</div></div></div></section>
+ <div class="rx-space" aria-label="Blank prescription writing area"></div>
+ </main></body></html>`;
+         w.document.write(html);w.document.close();
+         let printed=false,print=()=>{if(printed)return;printed=true;w.focus();w.print()};
+         let image=w.document.querySelector('.clinic-logo');
+         if(image&&!image.complete){image.addEventListener('load',print,{once:true});image.addEventListener('error',print,{once:true});setTimeout(print,800)}else setTimeout(print,150);
+     }catch(x){w.close();fail(x)}
+ }
 const visitTypeObserver=new MutationObserver(()=>{let p=$('vpatient');if(p&&!$('vtype')){let l=document.createElement('label');l.className='field';l.innerHTML='Visit type<select id="vtype"><option>General consultation</option><option>Follow-up</option><option>Emergency</option><option>Procedure</option><option>Teleconsultation</option></select>';p.closest('.row').insertBefore(l,p.closest('.row').children[1])}let m=document.querySelector('.detail-head .muted');if(currentVisit&&m&&!m.dataset.typeShown){m.dataset.typeShown='1';m.textContent=`${currentVisit.visitDate} · ${currentVisit.visitType||'General consultation'} · ${currentVisit.doctorName||'No doctor assigned'}`}});
 visitTypeObserver.observe($('content'),{childList:true,subtree:true});
 fetch('/api/session').then(r=>r.json()).then(async s=>{if(s.authenticated){role=s.role;await loadClinicBrand();showApp();page('dashboard')}}).catch(()=>{});

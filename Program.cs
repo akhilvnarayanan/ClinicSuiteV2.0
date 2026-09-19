@@ -1,4 +1,6 @@
+#if WINDOWS_DESKTOP
 using System.Windows.Forms;
+#endif
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -229,6 +231,12 @@ app.MapPost("/api/browse-folder", (HttpContext c) =>
 {
     if (!Admin(c)) return Results.StatusCode(403);
 
+#if !WINDOWS_DESKTOP
+    return Results.BadRequest(new
+    {
+        message = "Browse Folder is available only in the Windows app. Enter the backup folder path manually."
+    });
+#else
     if (!OperatingSystem.IsWindows())
         return Results.BadRequest(new
         {
@@ -281,6 +289,7 @@ app.MapPost("/api/browse-folder", (HttpContext c) =>
             message = "The Windows folder picker could not be opened. Enter the backup folder path manually."
         });
     }
+#endif
 });
 app.MapPost("/api/clinic-logo", async (HttpContext c, IFormFile file) => {
     if (!Admin(c)) return Results.StatusCode(403);
@@ -293,7 +302,7 @@ app.MapPost("/api/clinic-logo", async (HttpContext c, IFormFile file) => {
     var path = Path.Combine(folder, "clinic-logo" + ext);
     await using (var stream = File.Create(path)) await file.CopyToAsync(stream);
     return Results.Ok(new { logoPath = "/api/clinic-logo/file" });
-}).DisableAntiforgery();
+});
 app.MapGet("/api/clinic-logo/file", (HttpContext c) => {
     if (!Auth(c)) return Results.Unauthorized();
     var path = Directory.GetFiles(Path.Combine(dataRoot, "Branding"), "clinic-logo.*").FirstOrDefault();
@@ -363,7 +372,7 @@ app.MapPost("/api/documents/{patientId:int}/{visitId:int}", async (HttpContext c
     await using(var fs=File.Create(path)) await file.CopyToAsync(fs);
     db.AddDocument(patientId,visitId,Path.GetRelativePath(dataRoot,path),file.FileName);
     return Results.Ok(new{path});
-}).DisableAntiforgery();
+});
 app.MapGet("/api/documents/{patientId:int}/{visitId:int}", (HttpContext c,int patientId,int visitId) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return !db.VisitBelongsToPatient(visitId,patientId)?Results.NotFound():Results.Ok(db.Documents(patientId,visitId)); });
 app.MapGet("/api/documents/{id:int}/download", (HttpContext c,int id) => {
     if(!Auth(c)) return Results.Unauthorized();

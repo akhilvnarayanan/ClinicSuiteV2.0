@@ -5,3 +5,5 @@ screenshots/
 *.db
 *.db-shm
 *.db-wal
+Installer/Payload/
+Installer/Output/

@@ -1,4 +1,4 @@
-#define MyAppName "Clinic Management"
+#define MyAppName "Clinic Suite"
 #define MyAppVersion "1.0.0"
 #define MyAppExeName "ClinicManagement.exe"
 
@@ -6,42 +6,134 @@
 AppId={{7E0B9D67-9F7E-4D0A-8D2B-1C11C0000001}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
-DefaultDirName={autopf}\ClinicManagement
-DefaultGroupName=Clinic Management
+AppPublisher=AVN TechSphere
+DefaultDirName={autopf}\Clinic Suite
+DefaultGroupName=Clinic Suite
 OutputDir=Output
-OutputBaseFilename=ClinicManagementSetup
+OutputBaseFilename=ClinicSuiteSetup
 Compression=lzma
 SolidCompression=yes
+WizardStyle=modern
+DisableProgramGroupPage=yes
+CloseApplications=yes
+RestartApplications=no
 ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64
 PrivilegesRequired=admin
+Uninstallable=yes
+UninstallDisplayIcon={app}\{#MyAppExeName}
 
 [Files]
-Source: "..\bin\Release\net7.0-windows\win-x64\publish\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "Payload\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Dirs]
-Name: "{code:GetDataDir}"
+Name: "{code:GetDataDir}"; Permissions: users-modify
+
+[Tasks]
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Icons]
-Name: "{group}\Clinic Management"; Filename: "{app}\{#MyAppExeName}"
-Name: "{commondesktop}\Clinic Management"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\Clinic Suite"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
+Name: "{commondesktop}\Clinic Suite"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch Clinic Management"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch Clinic Suite"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
 [Code]
 var DataPage: TInputDirWizardPage;
 function GetDataDir(Param: String): String;
-begin Result := DataPage.Values[0]; end;
-procedure InitializeWizard;
 begin
-  DataPage := CreateInputDirPage(wpSelectDir, 'Clinic data location', 'Choose where patient data, database, documents and backups will be stored.', 'You can change this later from the application settings.', False, 'ClinicManagementData');
-  DataPage.Add('Data folder:');
-  DataPage.Values[0] := 'C:\ClinicManagementData';
+  Result := DataPage.Values[0];
 end;
-procedure CurStepChanged(CurStep: TSetupStep);
-var ConfigDir, ConfigFile, S: String;
+
+function ExistingDataDir(): String;
+var
+  ConfigFile, Contents, Marker, Value: String;
+  StartPos, EndPos: Integer;
 begin
-  if CurStep=ssPostInstall then begin
+  Result := '';
+  ConfigFile := ExpandConstant('{commonappdata}\ClinicManagement\config.json');
+  if not FileExists(ConfigFile) then
+    exit;
+  if not LoadStringFromFile(ConfigFile, Contents) then
+    exit;
+
+  Marker := '"DataPath":"';
+  StartPos := Pos(Marker, Contents);
+  if StartPos = 0 then
+    exit;
+  StartPos := StartPos + Length(Marker);
+  EndPos := StartPos;
+  while (EndPos <= Length(Contents)) and (Contents[EndPos] <> '"') do
+    Inc(EndPos);
+  if EndPos <= Length(Contents) then
+  begin
+    Value := Copy(Contents, StartPos, EndPos - StartPos);
+    StringChangeEx(Value, '\\', '\', True);
+    Result := Value;
+  end;
+end;
+
+function PathsOverlap(FirstPath, SecondPath: String): Boolean;
+var
+  FirstWithSlash, SecondWithSlash: String;
+begin
+  FirstWithSlash := AddBackslash(FirstPath);
+  SecondWithSlash := AddBackslash(SecondPath);
+  Result :=
+    (CompareText(FirstWithSlash, SecondWithSlash) = 0) or
+    (CompareText(Copy(SecondWithSlash, 1, Length(FirstWithSlash)), FirstWithSlash) = 0) or
+    (CompareText(Copy(FirstWithSlash, 1, Length(SecondWithSlash)), SecondWithSlash) = 0);
+end;
+
+procedure InitializeWizard;
+var
+  PreviousDataDir: String;
+begin
+  DataPage := CreateInputDirPage(wpSelectDir, 'Clinic data location', 'Choose where patient data, database, documents and backups will be stored.', 'This location is preserved during upgrades and is not removed by uninstall.', False, 'ClinicManagementData');
+  DataPage.Add('Data folder:');
+  PreviousDataDir := ExistingDataDir();
+  if PreviousDataDir <> '' then
+    DataPage.Values[0] := PreviousDataDir
+  else
+    DataPage.Values[0] := ExpandConstant('{commondocuments}\Clinic Suite Data');
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+var
+  AppDir, DataDir: String;
+begin
+  Result := True;
+  if CurPageID <> DataPage.ID then
+    exit;
+
+  DataDir := Trim(DataPage.Values[0]);
+  AppDir := ExpandConstant('{app}');
+  if DataDir = '' then
+  begin
+    MsgBox('Choose a clinic data folder before continuing.', mbError, MB_OK);
+    Result := False;
+    exit;
+  end;
+  if PathsOverlap(AppDir, DataDir) then
+  begin
+    MsgBox('The clinic data folder must be separate from the application installation folder.', mbError, MB_OK);
+    Result := False;
+    exit;
+  end;
+  if not ForceDirectories(DataDir) then
+  begin
+    MsgBox('The selected clinic data folder could not be created. Check the path and permissions.', mbError, MB_OK);
+    Result := False;
+  end;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ConfigDir, ConfigFile, S: String;
+begin
+  if CurStep = ssPostInstall then
+  begin
     ConfigDir := ExpandConstant('{commonappdata}\ClinicManagement');
     ForceDirectories(ConfigDir);
     ConfigFile := ConfigDir + '\config.json';

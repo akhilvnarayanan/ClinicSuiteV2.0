@@ -14,7 +14,6 @@ var configuredHost = Environment.GetEnvironmentVariable("CLINIC_HOST") ?? "127.0
 builder.WebHost.UseUrls($"http://{configuredHost}:{configuredPort}");
 var app = builder.Build();
 var sessions = new ConcurrentDictionary<string, Session>();
-var loginAttempts = new ConcurrentDictionary<string, LoginAttempt>();
 var secureCookies = string.Equals(Environment.GetEnvironmentVariable("CLINIC_SECURE_COOKIES"), "true", StringComparison.OrdinalIgnoreCase);
 
 var defaultData = Environment.GetEnvironmentVariable("CLINIC_DATA_PATH") ?? builder.Configuration["ClinicManagement:DefaultDataPath"] ?? @"C:\ClinicManagementData";
@@ -52,20 +51,10 @@ if (OperatingSystem.IsWindows()) _ = Task.Run(async () => { await Task.Delay(700
 app.MapGet("/api/session", (HttpContext c) => { var s = Current(c); return Results.Ok(new { authenticated = s is not null, role = s?.Role }); });
 
 app.MapPost("/api/login", (HttpContext c, LoginRequest r) => {
-    var attemptKey = $"{c.Connection.RemoteIpAddress?.ToString() ?? "unknown"}:{r.Username.Trim().ToLowerInvariant()}";
-    if (loginAttempts.TryGetValue(attemptKey, out var currentAttempt) && currentAttempt.BlockedUntil > DateTimeOffset.UtcNow)
-        return Results.Json(new { ok = false, message = "Too many failed attempts. Try again later." }, statusCode: 429);
     using var db = new Db(dbPath);
     var user = db.FindUser(r.Username);
     if (user is null || !PasswordHasher.Verify(r.Password, user.PasswordHash))
-    {
-        var now = DateTimeOffset.UtcNow;
-        loginAttempts.AddOrUpdate(attemptKey,
-            _ => new LoginAttempt(1, now.AddMinutes(5)),
-            (_, previous) => new LoginAttempt(previous.Failures + 1, previous.Failures + 1 >= 5 ? now.AddMinutes(5) : previous.BlockedUntil));
         return Results.Json(new { ok=false, message="Invalid username or password." }, statusCode:401);
-    }
-    loginAttempts.TryRemove(attemptKey, out _);
     var token = Guid.NewGuid().ToString("N");
     sessions[token] = new Session(user.Username, user.Role, DateTimeOffset.UtcNow.AddHours(8));
     c.Response.Cookies.Append("clinic_session", token, new CookieOptions{HttpOnly=true, SameSite=SameSiteMode.Strict, Secure=secureCookies || c.Request.IsHttps, MaxAge=TimeSpan.FromHours(8)});
@@ -773,7 +762,6 @@ record ClinicSettings(string ClinicName,string? Address,string? Phone,string? Em
 record TemplateSettings(string PrescriptionHtml,string InvoiceHtml);
 record InstallConfig(string? DataPath);
 record Session(string Username, string Role, DateTimeOffset Expires);
-record LoginAttempt(int Failures, DateTimeOffset BlockedUntil);
 record VisitRequest(int PatientId,int? DoctorId,string? VisitDate,string? VisitType,string? Notes,decimal ConsultationFee);
 record DoctorAvailabilityRequest(int DoctorId,bool Available);
 record VisitServiceRequest(int? ServiceId,string Description,decimal Amount);

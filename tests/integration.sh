@@ -15,6 +15,8 @@ status(){ curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE" -c "$COOKIE" "$@"
 grepq(){ grep -q "$1" <<<"$2"; }
 session="$(curl -fsS "$base/api/session")"; grepq '"authenticated":false' "$session"
 login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$login"
+for attempt in {1..5}; do [[ "$(curl -sS -o /dev/null -w '%{http_code}' -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"wrong-password"}' "$base/api/login")" == 401 ]]; done
+retry_login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$retry_login"
 browse="$(curl -sS -X POST -b "$COOKIE" "$base/api/browse-folder")"; grepq 'Windows app' "$browse"
 p="$(request -H 'Content-Type: application/json' -d '{"Name":"Integration Patient","Phone":"555","BloodGroup":"O+","Allergies":"Penicillin","MedicalConditions":"Asthma"}' "$base/api/patients")"; grepq 'patientCode' "$p"; pid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$p")"
 list="$(request "$base/api/patients?q=Integration")"; grepq 'Integration Patient' "$list"; patient="$(request "$base/api/patients/$pid")"; grepq '"bloodGroup":"O+"' "$patient"; grepq '"allergies":"Penicillin"' "$patient"; grepq '"medicalConditions":"Asthma"' "$patient"; request "$base/api/patients/$pid/history" >/dev/null

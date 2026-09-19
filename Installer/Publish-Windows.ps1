@@ -91,12 +91,13 @@ function Sign-AndVerify(
 }
 
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
-    throw "The .NET SDK is required. Install the .NET 8 SDK and run this script again."
+    throw "The .NET SDK is required. Install .NET 8 SDK or newer and run this script again."
 }
 
 $sdkVersion = (& dotnet --version).Trim()
-if (-not $sdkVersion.StartsWith("8.")) {
-    throw "Clinic Suite Windows packaging requires the .NET 8 SDK. Found $sdkVersion."
+$sdkMajor = [int]($sdkVersion.Split('.')[0])
+if ($sdkMajor -lt 8) {
+    throw "Clinic Suite Windows packaging requires the .NET 8 SDK or newer. Found $sdkVersion."
 }
 
 if (Test-Path $payload) {

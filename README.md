@@ -23,7 +23,7 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ```
 
 ## Installer
-On a Windows computer with the .NET 8 SDK installed, create the self-contained Windows payload with:
+On a Windows computer with the .NET 8 SDK or newer installed, create the self-contained Windows payload with:
 
 ```powershell
 .\Installer\Publish-Windows.ps1

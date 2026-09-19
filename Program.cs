@@ -158,6 +158,120 @@ string CreateBackup(ClinicSettings s, bool manual)
         }
     }
 }
+const long MaxRestoreArchiveBytes = 100 * 1024 * 1024;
+
+void ValidateRestoreDatabase(string path)
+{
+    var csb = new SqliteConnectionStringBuilder
+    {
+        DataSource = path,
+        Mode = SqliteOpenMode.ReadOnly,
+        Cache = SqliteCacheMode.Private,
+        Pooling = false
+    };
+
+    using var connection = new SqliteConnection(csb.ToString());
+    connection.Open();
+    using (var integrity = connection.CreateCommand())
+    {
+        integrity.CommandText = "PRAGMA integrity_check;";
+        if (!string.Equals(Convert.ToString(integrity.ExecuteScalar()), "ok", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("The backup database failed its SQLite integrity check.");
+    }
+
+    using (var schema = connection.CreateCommand())
+    {
+        schema.CommandText = @"SELECT COUNT(*) FROM sqlite_master
+                               WHERE type='table' AND name IN
+                               ('Users','Patients','Visits','ClinicSettings','DocumentTemplates')";
+        if (Convert.ToInt32(schema.ExecuteScalar()) != 5)
+            throw new InvalidDataException("The backup is not a compatible Clinic Suite database.");
+    }
+
+    using (var admin = connection.CreateCommand())
+    {
+        admin.CommandText = "SELECT COUNT(*) FROM Users WHERE Role='Admin' AND Active=1";
+        if (Convert.ToInt32(admin.ExecuteScalar()) < 1)
+            throw new InvalidDataException("The backup must contain at least one active administrator account.");
+    }
+}
+
+string RestoreDatabaseFromArchive(string archivePath, ClinicSettings settings)
+{
+    lock (backupLock)
+    {
+        var dataDirectory = Path.GetDirectoryName(dbPath) ?? dataRoot;
+        var restoredDb = Path.Combine(dataDirectory, ".clinic-restore-" + Guid.NewGuid().ToString("N") + ".db");
+        var rollbackDb = Path.Combine(dataDirectory, ".clinic-rollback-" + Guid.NewGuid().ToString("N") + ".db");
+        var safetyBackup = "";
+        var replaced = false;
+
+        try
+        {
+            using (var archive = System.IO.Compression.ZipFile.OpenRead(archivePath))
+            {
+                var entry = archive.GetEntry("clinic.db");
+                if (entry is null || entry.Length < 1024)
+                    throw new InvalidDataException("Choose a Clinic Suite backup ZIP containing clinic.db.");
+                if (entry.Length > MaxRestoreArchiveBytes)
+                    throw new InvalidDataException("The backup database is too large to restore.");
+
+                using var input = entry.Open();
+                using var output = new FileStream(restoredDb, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+                input.CopyTo(output);
+            }
+
+            ValidateRestoreDatabase(restoredDb);
+            safetyBackup = CreateBackup(settings, true);
+
+            // Flush WAL state and release pooled handles before swapping database files.
+            using (var checkpoint = new SqliteConnection($"Data Source={dbPath};Cache=Private;Pooling=false"))
+            {
+                checkpoint.Open();
+                using var command = checkpoint.CreateCommand();
+                command.CommandText = "PRAGMA wal_checkpoint(TRUNCATE);";
+                command.ExecuteNonQuery();
+            }
+            SqliteConnection.ClearAllPools();
+
+            File.Copy(dbPath, rollbackDb, true);
+            foreach (var sidecar in new[] { dbPath + "-wal", dbPath + "-shm" })
+                if (File.Exists(sidecar)) File.Delete(sidecar);
+
+            if (OperatingSystem.IsWindows())
+                File.Replace(restoredDb, dbPath, null, true);
+            else
+                File.Move(restoredDb, dbPath, true);
+            replaced = true;
+
+            using (var restored = new Db(dbPath))
+                restored.Initialize();
+            ValidateRestoreDatabase(dbPath);
+
+            return safetyBackup;
+        }
+        catch
+        {
+            if (replaced)
+            {
+                try
+                {
+                    SqliteConnection.ClearAllPools();
+                    foreach (var sidecar in new[] { dbPath + "-wal", dbPath + "-shm" })
+                        if (File.Exists(sidecar)) File.Delete(sidecar);
+                    File.Copy(rollbackDb, dbPath, true);
+                }
+                catch { /* Preserve the original restore error for the caller. */ }
+            }
+            throw;
+        }
+        finally
+        {
+            try { if (File.Exists(restoredDb)) File.Delete(restoredDb); } catch { }
+            try { if (File.Exists(rollbackDb)) File.Delete(rollbackDb); } catch { }
+        }
+    }
+}
 bool ScheduledDue(ClinicSettings s, DateTime now)
 {
     if (s.BackupSchedule is not ("Daily" or "Weekly") || !TimeSpan.TryParse(s.BackupTime, out var at)) return false;
@@ -390,6 +504,43 @@ app.MapPost("/api/backup", (HttpContext c) => {
     catch (Exception ex)
     {
         return Results.BadRequest(new { message = "Backup failed: " + ex.Message });
+    }
+});
+app.MapPost("/api/restore", async (HttpContext c, IFormFile file) => {
+    if (!Admin(c)) return Results.StatusCode(403);
+    if (file.Length == 0 || file.Length > MaxRestoreArchiveBytes)
+        return Results.BadRequest(new { message = "Choose a backup ZIP smaller than 100 MB." });
+    if (!string.Equals(Path.GetExtension(file.FileName), ".zip", StringComparison.OrdinalIgnoreCase))
+        return Results.BadRequest(new { message = "Choose a Clinic Suite backup ZIP file." });
+
+    var upload = Path.Combine(Path.GetTempPath(), "ClinicRestore-" + Guid.NewGuid().ToString("N") + ".zip");
+    try
+    {
+        await using (var output = File.Create(upload))
+            await file.CopyToAsync(output);
+
+        ClinicSettings settings;
+        using (var db = new Db(dbPath)) settings = db.Settings();
+        RestoreDatabaseFromArchive(upload, settings);
+        sessions.Clear();
+        c.Response.Cookies.Delete("clinic_session");
+        return Results.Ok(new { ok = true, message = "Database restored successfully. Sign in again to continue." });
+    }
+    catch (InvalidDataException ex)
+    {
+        return Results.BadRequest(new { message = ex.Message });
+    }
+    catch (IOException)
+    {
+        return Results.BadRequest(new { message = "The database could not be restored. Check that the backup is valid and the database folder is writable." });
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { message = "Restore failed: " + ex.Message });
+    }
+    finally
+    {
+        try { if (File.Exists(upload)) File.Delete(upload); } catch { }
     }
 });
 

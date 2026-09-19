@@ -1,4 +1,4 @@
-# Clinic Management Web v1
+# Clinic Suite v1.0
 
 Offline/local clinic management application using ASP.NET Core + HTML/CSS/JavaScript + SQLite.
 

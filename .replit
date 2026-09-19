@@ -1,4 +1,4 @@
-modules = ["web", "dotnet-7.0", "bash", "python-base-3.13", "nodejs-24"]
+modules = ["web", "bash", "python-base-3.13", "nodejs-24", "dotnet-8.0"]
 [nix]
 channel = "stable-25_05"
 packages = ["unzip"]

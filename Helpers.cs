@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         if (Scalar<long>("SELECT COUNT(*) FROM Users") == 0) { AddUser(new("admin", "Admin@123", "Admin")); AddUser(new("receptionist", "Reception@123", "Receptionist")); }
         if (Scalar<long>("SELECT COUNT(*) FROM ClinicSettings") == 0) SaveSettings(new("My Clinic", "", "", "", "", "", "", "SGD", "", "", "", "", "Off", "02:00", "Monday", null));
         if (Scalar<long>("SELECT COUNT(*) FROM DocumentTemplates") == 0) SaveTemplates(new(TemplateDefaults.PrescriptionHtml, TemplateDefaults.InvoiceHtml));
+        else MigrateInvoiceTemplate(TemplateDefaults.LegacyInvoiceHtml, TemplateDefaults.InvoiceHtml);
     }
     T Scalar<T>(string sql) { using var c = C.CreateCommand(); c.CommandText = sql; return (T)Convert.ChangeType(c.ExecuteScalar()!, typeof(T)); }
     public UserRow? FindUser(string u) { using var c = C.CreateCommand(); c.CommandText = "SELECT Username,PasswordHash,Role FROM Users WHERE Username=$u AND Active=1"; c.Parameters.AddWithValue("$u", u); using var r = c.ExecuteReader(); return r.Read() ? new(r.GetString(0), r.GetString(1), r.GetString(2)) : null; }
@@ -181,6 +182,14 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
         c.CommandText = "INSERT INTO DocumentTemplates(Id,PrescriptionHtml,InvoiceHtml) VALUES(1,$p,$i) ON CONFLICT(Id) DO UPDATE SET PrescriptionHtml=$p,InvoiceHtml=$i";
         c.Parameters.AddWithValue("$p", x.PrescriptionHtml);
         c.Parameters.AddWithValue("$i", x.InvoiceHtml);
+        c.ExecuteNonQuery();
+    }
+    void MigrateInvoiceTemplate(string previous, string updated)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = "UPDATE DocumentTemplates SET InvoiceHtml=$updated WHERE Id=1 AND InvoiceHtml=$previous";
+        c.Parameters.AddWithValue("$previous", previous);
+        c.Parameters.AddWithValue("$updated", updated);
         c.ExecuteNonQuery();
     }
     public void MarkScheduledBackup(string when) { using var c = C.CreateCommand(); c.CommandText = "UPDATE ClinicSettings SET LastScheduledBackup=$t WHERE Id=1"; c.Parameters.AddWithValue("$t", when); c.ExecuteNonQuery(); }

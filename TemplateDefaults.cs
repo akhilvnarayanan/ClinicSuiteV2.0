@@ -11,6 +11,13 @@ public static class TemplateDefaults
 """;
 
     public const string InvoiceHtml = """
+<header class="letterhead">{{clinic.logo}}<div class="clinic-copy"><h1 class="clinic-name">{{clinic.name}}</h1>{{clinic.type}}{{clinic.address}}{{clinic.phone}}{{clinic.email}}</div></header>
+<hr class="rule">
+<div class="detail-head"><div><h2>{{patient.name}}</h2><p class="muted">{{patient.code}} · {{visit.date}}</p></div></div>
+{{invoice.rows}}
+""";
+
+    public const string LegacyInvoiceHtml = """
 <div class="print-only"><h1>{{clinic.name}}</h1></div>
 <div class="detail-head"><div><span class="eyebrow">{{invoice.title}} · Visit {{visit.id}}</span><h2>{{patient.name}}</h2><p class="muted">{{patient.code}} · {{visit.date}}</p></div><span class="badge {{invoice.statusClass}}">{{invoice.status}}</span></div>
 {{invoice.rows}}

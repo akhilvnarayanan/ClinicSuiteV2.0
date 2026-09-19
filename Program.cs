@@ -67,16 +67,14 @@ app.MapPost("/api/login", (HttpContext c, LoginRequest r) => {
     }
     loginAttempts.TryRemove(attemptKey, out _);
     var token = Guid.NewGuid().ToString("N");
-    var mustChangePassword = (user.Username.Equals("admin", StringComparison.OrdinalIgnoreCase) && PasswordHasher.Verify("Admin@123", user.PasswordHash))
-        || (user.Username.Equals("receptionist", StringComparison.OrdinalIgnoreCase) && PasswordHasher.Verify("Reception@123", user.PasswordHash));
-    sessions[token] = new Session(user.Username, user.Role, DateTimeOffset.UtcNow.AddHours(8), mustChangePassword);
+    sessions[token] = new Session(user.Username, user.Role, DateTimeOffset.UtcNow.AddHours(8));
     c.Response.Cookies.Append("clinic_session", token, new CookieOptions{HttpOnly=true, SameSite=SameSiteMode.Strict, Secure=secureCookies || c.Request.IsHttps, MaxAge=TimeSpan.FromHours(8)});
-    return Results.Ok(new {ok=true, role=user.Role, mustChangePassword});
+    return Results.Ok(new {ok=true, role=user.Role});
 });
 app.MapPost("/api/logout", (HttpContext c) => { if (c.Request.Cookies.TryGetValue("clinic_session", out var token)) sessions.TryRemove(token, out _); c.Response.Cookies.Delete("clinic_session"); return Results.Ok(new{ok=true}); });
 
 Session? Current(HttpContext c) => c.Request.Cookies.TryGetValue("clinic_session", out var token) && sessions.TryGetValue(token, out var s) && s.Expires > DateTimeOffset.UtcNow ? s : null;
-bool Auth(HttpContext c) => Current(c) is { MustChangePassword: false };
+bool Auth(HttpContext c) => Current(c) is not null;
 bool Admin(HttpContext c) => Auth(c) && Current(c)?.Role == "Admin";
 void InvalidateSessions(string username)
 {
@@ -85,21 +83,6 @@ void InvalidateSessions(string username)
             sessions.TryRemove(pair.Key, out _);
 }
 
-app.MapPost("/api/account/password", (HttpContext c, PasswordChangeRequest r) =>
-{
-    var session = Current(c);
-    if (session is null) return Results.Unauthorized();
-    if (string.IsNullOrWhiteSpace(r.CurrentPassword) || string.IsNullOrWhiteSpace(r.NewPassword) || r.NewPassword.Length < 8)
-        return Results.BadRequest(new { message = "Enter the current password and a new password of at least 8 characters." });
-    using var db = new Db(dbPath);
-    var user = db.FindUser(session.Username);
-    if (user is null || !PasswordHasher.Verify(r.CurrentPassword, user.PasswordHash))
-        return Results.BadRequest(new { message = "The current password is incorrect." });
-    db.UpdatePassword(session.Username, PasswordHasher.Hash(r.NewPassword));
-    InvalidateSessions(session.Username);
-    c.Response.Cookies.Delete("clinic_session");
-    return Results.Ok(new { ok = true, message = "Password changed. Sign in again with the new password." });
-});
 string BackupDestination(ClinicSettings s, bool manual) {
     var configured = manual ? s.ManualBackupPath : s.BackupPath;
     return string.IsNullOrWhiteSpace(configured)
@@ -762,8 +745,7 @@ record UserUpdateRequest(string Username,string Role,bool Active,string? Passwor
 record ClinicSettings(string ClinicName,string? Address,string? Phone,string? Email,string? Website,string? RegistrationNo,string? TaxNo,string? Currency,string? LogoPath,string? Footer,string? ManualBackupPath = "",string? BackupPath = "",string? BackupSchedule = "Off",string? BackupTime = "02:00",string? BackupDay = "Monday",string? LastScheduledBackup = null,string? ClinicType = "");
 record TemplateSettings(string PrescriptionHtml,string InvoiceHtml);
 record InstallConfig(string? DataPath);
-record Session(string Username, string Role, DateTimeOffset Expires, bool MustChangePassword = false);
-record PasswordChangeRequest(string CurrentPassword, string NewPassword);
+record Session(string Username, string Role, DateTimeOffset Expires);
 record LoginAttempt(int Failures, DateTimeOffset BlockedUntil);
 record VisitRequest(int PatientId,int? DoctorId,string? VisitDate,string? VisitType,string? Notes,decimal ConsultationFee);
 record DoctorAvailabilityRequest(int DoctorId,bool Available);

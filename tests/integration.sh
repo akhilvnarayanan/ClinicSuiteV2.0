@@ -14,9 +14,7 @@ request(){ curl -fsS -b "$COOKIE" -c "$COOKIE" "$@"; }
 status(){ curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE" -c "$COOKIE" "$@"; }
 grepq(){ grep -q "$1" <<<"$2"; }
 session="$(curl -fsS "$base/api/session")"; grepq '"authenticated":false' "$session"
-login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$login"; grepq '"mustChangePassword":true' "$login"
-request -H 'Content-Type: application/json' -d '{"CurrentPassword":"Admin@123","NewPassword":"Admin@1234"}' "$base/api/account/password" >/dev/null
-login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@1234"}' "$base/api/login")"; grepq '"mustChangePassword":false' "$login"
+login="$(curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login")"; grepq '"role":"Admin"' "$login"
 browse="$(curl -sS -X POST -b "$COOKIE" "$base/api/browse-folder")"; grepq 'Windows app' "$browse"
 p="$(request -H 'Content-Type: application/json' -d '{"Name":"Integration Patient","Phone":"555","BloodGroup":"O+","Allergies":"Penicillin","MedicalConditions":"Asthma"}' "$base/api/patients")"; grepq 'patientCode' "$p"; pid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$p")"
 list="$(request "$base/api/patients?q=Integration")"; grepq 'Integration Patient' "$list"; patient="$(request "$base/api/patients/$pid")"; grepq '"bloodGroup":"O+"' "$patient"; grepq '"allergies":"Penicillin"' "$patient"; grepq '"medicalConditions":"Asthma"' "$patient"; request "$base/api/patients/$pid/history" >/dev/null
@@ -66,16 +64,14 @@ mkdir -p "$DATA/extracted"; unzip -q "$backup" -d "$DATA/extracted"
 [[ "$(sqlite3 "$DATA/extracted/clinic.db" "SELECT COUNT(*) FROM Payments WHERE VisitId=$vid AND Amount=30;")" == "1" ]]
 [[ "$(find "$DATA/extracted" -mindepth 1 -type f -printf '%P\n' | sort)" == "clinic.db" ]]
 restored="$(curl -fsS -b "$COOKIE" -c "$COOKIE" -F "file=@$backup" "$base/api/restore")"; grepq 'Database restored successfully' "$restored"
-curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@1234"}' "$base/api/login" >/dev/null
+curl -fsS -c "$COOKIE" -H 'Content-Type: application/json' -d '{"Username":"admin","Password":"Admin@123"}' "$base/api/login" >/dev/null
 [[ "$(find "$custom_backup" -name '*.zip' -print -quit)" == "" ]]
 second="$(request -H 'Content-Type: application/json' -d '{"Username":"testuser","Password":"Test@123","Role":"Receptionist"}' "$base/api/users" 2>/dev/null || true)"
 [[ "$(status -H 'Content-Type: application/json' -d '{"Username":"testuser","Password":"Test@123","Role":"Receptionist"}' "$base/api/users")" == 409 ]]
 printf 'other patient' >"$DATA/other.txt"
 other="$(request -H 'Content-Type: application/json' -d '{"Name":"Other Patient"}' "$base/api/patients")"; otherid="$(sed -E 's/.*"id":([0-9]+).*/\1/' <<<"$other")"
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$COOKIE" -F "file=@$DATA/other.txt" "$base/api/documents/$otherid/$vid")" == 404 ]]
-reception_login="$(curl -fsS -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"Username":"receptionist","Password":"Reception@123"}' "$base/api/login")"; grepq '"mustChangePassword":true' "$reception_login"
-curl -fsS -b "$DATA/reception-cookie" -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"CurrentPassword":"Reception@123","NewPassword":"Reception@1234"}' "$base/api/account/password" >/dev/null
-curl -fsS -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"Username":"receptionist","Password":"Reception@1234"}' "$base/api/login" >/dev/null
+curl -fsS -c "$DATA/reception-cookie" -H 'Content-Type: application/json' -d '{"Username":"receptionist","Password":"Reception@123"}' "$base/api/login" >/dev/null
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$DATA/reception-cookie" "$base/api/patients")" == 200 ]]
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$DATA/reception-cookie" "$base/api/clinic-profile")" == 200 ]]
 [[ "$(curl -sS -o /dev/null -w '%{http_code}' -b "$DATA/reception-cookie" "$base/api/clinic-logo/file")" == 200 ]]

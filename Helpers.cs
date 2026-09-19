@@ -65,14 +65,6 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
     }
     T Scalar<T>(string sql) { using var c = C.CreateCommand(); c.CommandText = sql; return (T)Convert.ChangeType(c.ExecuteScalar()!, typeof(T)); }
     public UserRow? FindUser(string u) { using var c = C.CreateCommand(); c.CommandText = "SELECT Username,PasswordHash,Role FROM Users WHERE Username=$u AND Active=1"; c.Parameters.AddWithValue("$u", u); using var r = c.ExecuteReader(); return r.Read() ? new(r.GetString(0), r.GetString(1), r.GetString(2)) : null; }
-    public bool UpdatePassword(string username, string passwordHash)
-    {
-        using var c = C.CreateCommand();
-        c.CommandText = "UPDATE Users SET PasswordHash=$p WHERE Username=$u AND Active=1";
-        c.Parameters.AddWithValue("$u", username);
-        c.Parameters.AddWithValue("$p", passwordHash);
-        return c.ExecuteNonQuery() == 1;
-    }
     public bool AddUser(UserRequest x) { using var c = C.CreateCommand(); c.CommandText = "INSERT OR IGNORE INTO Users(Username,PasswordHash,Role) VALUES($u,$p,$r)"; c.Parameters.AddWithValue("$u", x.Username.Trim()); c.Parameters.AddWithValue("$p", PasswordHasher.Hash(x.Password)); c.Parameters.AddWithValue("$r", x.Role); return c.ExecuteNonQuery() == 1; }
     public object Users() { using var c = C.CreateCommand(); c.CommandText = "SELECT Id,Username,Role,Active FROM Users ORDER BY Username"; using var r = c.ExecuteReader(); var a = new List<object>(); while (r.Read()) a.Add(new { Id = r.GetInt64(0), Username = r.GetString(1), Role = r.GetString(2), Active = r.GetInt64(3) == 1 }); return a; }
     public UserAdminRow? GetUserForAdmin(int id) { using var c = C.CreateCommand(); c.CommandText = "SELECT Username,Role,Active FROM Users WHERE Id=$i"; c.Parameters.AddWithValue("$i", id); using var r = c.ExecuteReader(); return r.Read() ? new(r.GetString(0), r.GetString(1), r.GetInt64(2) == 1) : null; }

@@ -10,11 +10,11 @@ Offline/local clinic management application using ASP.NET Core + HTML/CSS/JavaSc
 - Admin and Receptionist roles are included.
 - Clinic profile, backup, users, doctors and services are prepared.
 
-## First-run login
+## Default login
 - admin / Admin@123
 - receptionist / Reception@123
 
-These seeded accounts require a password change before clinic data can be opened. Create named user accounts and avoid sharing the seeded credentials.
+The administrator manages staff passwords and account access from the Users screen inside the app.
 
 ## Build
 ```powershell

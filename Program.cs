@@ -374,6 +374,13 @@ app.MapPut("/api/patients/{id:int}", (HttpContext c, int id, PatientRequest r) =
     using var db = new Db(dbPath);
     return db.UpdatePatient(id, r) ? Results.Ok(db.GetPatient(id)) : Results.NotFound();
 });
+app.MapDelete("/api/patients/{id:int}", (HttpContext c, int id) => {
+    if (!Admin(c)) return Results.StatusCode(403);
+    using var db = new Db(dbPath);
+    if (db.PatientHasHistory(id))
+        return Results.Conflict(new { message = "This patient has visits or documents and cannot be deleted. Keep the record for history." });
+    return db.DeletePatient(id) ? Results.Ok(new { ok = true }) : Results.NotFound();
+});
 app.MapGet("/api/patients/{id:int}", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); var p=db.GetPatient(id); return p is null?Results.NotFound():Results.Ok(p); });
 app.MapGet("/api/patients/{id:int}/history", (HttpContext c,int id) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.PatientHistory(id)); });
 app.MapGet("/api/visits", (HttpContext c,int? patientId) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Visits(patientId)); });
@@ -453,6 +460,13 @@ app.MapPut("/api/services/{id:int}", (HttpContext c, int id, ServiceRequest r) =
     if (string.IsNullOrWhiteSpace(r.Name) || r.Price < 0) return Results.BadRequest(new { message = "Name and a non-negative price are required." });
     using var db = new Db(dbPath);
     return db.UpdateService(id, r) ? Results.Ok() : Results.NotFound();
+});
+app.MapDelete("/api/services/{id:int}", (HttpContext c, int id) => {
+    if (!Admin(c)) return Results.StatusCode(403);
+    using var db = new Db(dbPath);
+    if (db.ServiceHasCharges(id))
+        return Results.Conflict(new { message = "This service is used on existing charges and cannot be deleted. Mark the service inactive instead." });
+    return db.DeleteService(id) ? Results.Ok(new { ok = true }) : Results.NotFound();
 });
 app.MapGet("/api/settings", (HttpContext c) => { if(!Admin(c)) return Results.StatusCode(403); using var db=new Db(dbPath); return Results.Ok(db.Settings()); });
 app.MapPost("/api/settings", (HttpContext c, ClinicSettings s) => {

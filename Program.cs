@@ -489,7 +489,7 @@ record DoctorRequest(string Name,string? Specialization,string? Phone,decimal Co
 record ServiceRequest(string Name,decimal Price,bool Active = true);
 record UserRequest(string Username,string Password,string Role);
 record UserUpdateRequest(string Username,string Role,bool Active,string? Password);
-record ClinicSettings(string ClinicName,string? Address,string? Phone,string? Email,string? Website,string? RegistrationNo,string? TaxNo,string? Currency,string? LogoPath,string? Footer,string? ManualBackupPath = "",string? BackupPath = "",string? BackupSchedule = "Off",string? BackupTime = "02:00",string? BackupDay = "Monday",string? LastScheduledBackup = null);
+record ClinicSettings(string ClinicName,string? Address,string? Phone,string? Email,string? Website,string? RegistrationNo,string? TaxNo,string? Currency,string? LogoPath,string? Footer,string? ManualBackupPath = "",string? BackupPath = "",string? BackupSchedule = "Off",string? BackupTime = "02:00",string? BackupDay = "Monday",string? LastScheduledBackup = null,string? ClinicType = "");
 record InstallConfig(string? DataPath);
 record Session(string Username, string Role, DateTimeOffset Expires);
 record VisitRequest(int PatientId,int? DoctorId,string? VisitDate,string? VisitType,string? Notes,decimal ConsultationFee);

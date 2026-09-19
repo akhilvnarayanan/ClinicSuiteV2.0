@@ -238,6 +238,14 @@ app.MapPost("/api/settings", (HttpContext c, ClinicSettings s) => {
         return Results.BadRequest(new { message = "The backup folder could not be created. Check the path and permissions." });
     }
 });
+app.MapGet("/api/templates", (HttpContext c) => { if(!Auth(c)) return Results.Unauthorized(); using var db=new Db(dbPath); return Results.Ok(db.Templates()); });
+app.MapPost("/api/templates", (HttpContext c, TemplateSettings t) => {
+    if (!Admin(c)) return Results.StatusCode(403);
+    if (string.IsNullOrWhiteSpace(t.PrescriptionHtml) || string.IsNullOrWhiteSpace(t.InvoiceHtml)) return Results.BadRequest(new { message = "Both prescription and invoice templates are required." });
+    using var db = new Db(dbPath);
+    db.SaveTemplates(t);
+    return Results.Ok(db.Templates());
+});
 app.MapPost("/api/browse-folder", (HttpContext c) =>
 {
     if (!Admin(c)) return Results.StatusCode(403);
@@ -492,6 +500,7 @@ record ServiceRequest(string Name,decimal Price,bool Active = true);
 record UserRequest(string Username,string Password,string Role);
 record UserUpdateRequest(string Username,string Role,bool Active,string? Password);
 record ClinicSettings(string ClinicName,string? Address,string? Phone,string? Email,string? Website,string? RegistrationNo,string? TaxNo,string? Currency,string? LogoPath,string? Footer,string? ManualBackupPath = "",string? BackupPath = "",string? BackupSchedule = "Off",string? BackupTime = "02:00",string? BackupDay = "Monday",string? LastScheduledBackup = null,string? ClinicType = "");
+record TemplateSettings(string PrescriptionHtml,string InvoiceHtml);
 record InstallConfig(string? DataPath);
 record Session(string Username, string Role, DateTimeOffset Expires);
 record VisitRequest(int PatientId,int? DoctorId,string? VisitDate,string? VisitType,string? Notes,decimal ConsultationFee);

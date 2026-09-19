@@ -172,6 +172,33 @@ CREATE TABLE IF NOT EXISTS Documents(Id INTEGER PRIMARY KEY AUTOINCREMENT,Patien
     public object? Visit(int id) { var all=(List<object>)Visits(null); return all.FirstOrDefault(x => (long)x.GetType().GetProperty("id")!.GetValue(x)! == id); }
     public object AddVisitService(int id,VisitServiceRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO VisitServices(VisitId,ServiceId,Description,Amount) VALUES($v,$s,$d,$a);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$s",x.ServiceId??(object)DBNull.Value); c.Parameters.AddWithValue("$d",x.Description); c.Parameters.AddWithValue("$a",x.Amount); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id}; }
     public object AddPayment(int id,PaymentRequest x) { using var c=C.CreateCommand(); c.CommandText="INSERT INTO Payments(VisitId,Amount,Method,PaidAt) VALUES($v,$a,$m,$t);SELECT last_insert_rowid()"; c.Parameters.AddWithValue("$v",id); c.Parameters.AddWithValue("$a",x.Amount); c.Parameters.AddWithValue("$m",x.Method??""); c.Parameters.AddWithValue("$t",DateTime.Now.ToString("s")); return new{id=Convert.ToInt64(c.ExecuteScalar()),visitId=id,amount=x.Amount}; }
+    public object PaymentHistory(int patientId)
+    {
+        using var c = C.CreateCommand();
+        c.CommandText = @"SELECT pay.Id,pay.PaidAt,pay.Amount,
+                                 COALESCE(NULLIF((SELECT group_concat(vs.Description, ', ')
+                                                  FROM VisitServices vs
+                                                  WHERE vs.VisitId=v.Id), ''),
+                                          NULLIF(v.VisitType, ''), 'Consultation')
+                          FROM Payments pay
+                          JOIN Visits v ON v.Id=pay.VisitId
+                          WHERE v.PatientId=$p
+                          ORDER BY pay.PaidAt DESC,pay.Id DESC";
+        c.Parameters.AddWithValue("$p", patientId);
+        using var r = c.ExecuteReader();
+        var payments = new List<object>();
+        while (r.Read())
+        {
+            payments.Add(new
+            {
+                id = r.GetInt64(0),
+                paymentDate = r.GetString(1),
+                amountPaid = r.GetDecimal(2),
+                service = r.GetString(3)
+            });
+        }
+        return payments;
+    }
     public object PatientHistory(int id) => Visits(id);
     public object Documents(int patientId,int visitId) { using var c=C.CreateCommand(); c.CommandText="SELECT Id id,OriginalName name,FilePath path,CreatedAt createdAt FROM Documents WHERE PatientId=$p AND VisitId=$v ORDER BY Id DESC"; c.Parameters.AddWithValue("$p",patientId); c.Parameters.AddWithValue("$v",visitId); using var r=c.ExecuteReader(); var list=new List<Dictionary<string,object?>>(); while(r.Read()){var d=new Dictionary<string,object?>();for(int i=0;i<r.FieldCount;i++)d[r.GetName(i)]=r.IsDBNull(i)?null:r.GetValue(i);list.Add(d);} return list; }
     public object PatientDocuments(int patientId)

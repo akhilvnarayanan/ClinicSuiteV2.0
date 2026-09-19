@@ -106,7 +106,7 @@ New-Item $payload -ItemType Directory -Force | Out-Null
 
 Push-Location $root
 try {
-    & dotnet restore $project
+    & dotnet restore $project --runtime win-x64
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet restore failed."
     }

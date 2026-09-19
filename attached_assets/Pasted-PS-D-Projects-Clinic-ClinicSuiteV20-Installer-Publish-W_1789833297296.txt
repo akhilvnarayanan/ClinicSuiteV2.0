@@ -1,0 +1,75 @@
+PS D:\Projects\Clinic\ClinicSuiteV20> .\Installer\Publish-Windows.ps1 -BuildInstaller
+Restore complete (0.4s)
+
+Build succeeded in 0.8s
+  ClinicManagement net8.0-windows win-x64 succeeded (9.5s) → Installer\Payload\
+
+Build succeeded in 9.9s
+Downloading pinned ImageMagick 7.1.2-31...
+Verified ImageMagick installer checksum: 765eeb01e4def9ab7dfb8e3989141a6a3fae578b34309cc72969768cb0d2e917
+Windows payload created at D:\Projects\Clinic\ClinicSuiteV20\Installer\Payload
+WARNING: The generated installer will be unsigned. Use -Sign -CertificateThumbprint <thumbprint> for public
+distribution.
+Inno Setup 6 Command-Line Compiler
+Copyright (C) 1997-2026 Jordan Russell. All rights reserved.
+Portions Copyright (C) 2000-2026 Martijn Laan. All rights reserved.
+Portions Copyright (C) 2001-2004 Alex Yackimoff. All rights reserved.
+https://www.innosetup.com
+
+Compiler engine version: Inno Setup 6.7.3
+Non-commercial use only
+
+Preprocessing
+   Reading file: C:\Program Files (x86)\Inno Setup 6\ISPPBuiltins.iss
+Parsing [Setup] section, line 6
+Parsing [Setup] section, line 7
+Parsing [Setup] section, line 8
+Parsing [Setup] section, line 9
+Parsing [Setup] section, line 10
+Parsing [Setup] section, line 11
+Parsing [Setup] section, line 12
+Parsing [Setup] section, line 13
+Parsing [Setup] section, line 14
+Parsing [Setup] section, line 15
+Parsing [Setup] section, line 16
+Parsing [Setup] section, line 17
+Parsing [Setup] section, line 18
+Parsing [Setup] section, line 19
+Parsing [Setup] section, line 20
+Parsing [Setup] section, line 21
+Parsing [Setup] section, line 22
+Parsing [Setup] section, line 23
+Parsing [Setup] section, line 24
+Reading file (WizardImageFile)
+Reading file (WizardSmallImageFile)
+Preparing Setup program executable
+   Verification successful
+   Updating icons (Setup.e32)
+   Updating version info (Setup.e32)
+Determining language code pages
+   Reading file: C:\Program Files (x86)\Inno Setup 6\Default.isl
+   Messages in script file
+Reading default messages from Default.isl
+Parsing [LangOptions], [Messages], and [CustomMessages] sections
+   Reading file: C:\Program Files (x86)\Inno Setup 6\Default.isl
+   Messages in script file
+Reading [Code] section
+Parsing [Tasks] section, line 33
+Parsing [Dirs] section, line 30
+Parsing [Icons] section, line 36
+Parsing [Icons] section, line 37
+Parsing [Run] section, line 40
+Parsing [Run] section, line 41
+Parsing [Files] section, line 27
+Compiling [Code] section
+Error on line 74 in D:\Projects\Clinic\ClinicSuiteV20\Installer\Setup.iss: Column 52:
+Type mismatch.
+Compile aborted.
+Inno Setup compilation failed.
+At D:\Projects\Clinic\ClinicSuiteV20\Installer\Publish-Windows.ps1:183 char:9
++         throw "Inno Setup compilation failed."
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : OperationStopped: (Inno Setup compilation failed.:String) [], RuntimeException
+    + FullyQualifiedErrorId : Inno Setup compilation failed.
+
+PS D:\Projects\Clinic\ClinicSuiteV20>

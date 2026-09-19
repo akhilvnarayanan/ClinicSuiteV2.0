@@ -35,6 +35,14 @@ Install Inno Setup 6 and create the installer with:
 .\Installer\Publish-Windows.ps1 -BuildInstaller
 ```
 
+That command creates an unsigned development installer. For public distribution, install the organization's code-signing certificate with its private key in the Windows `CurrentUser\My` or `LocalMachine\My` certificate store, install the Windows SDK (`signtool.exe`), and run:
+
+```powershell
+.\Installer\Publish-Windows.ps1 -BuildInstaller -Sign -CertificateThumbprint "CERTIFICATE_THUMBPRINT"
+```
+
+The signing flow signs and verifies the published `ClinicManagement.exe` before Inno Setup packages it, then signs and verifies `ClinicSuiteSetup.exe` with SHA-256 and an RFC 3161 timestamp. The certificate and private key stay in the Windows certificate store and are never written to the repository or installer payload.
+
 The installer lets the user choose the application folder and clinic data folder. It writes the selected data path to `%ProgramData%\ClinicManagement\config.json`, preserves the selected data folder during upgrades, and does not remove it during uninstall.
 
 The Windows packaging script downloads and verifies the pinned official ImageMagick `7.1.2-31` Q16 x64 installer. Inno Setup runs it silently into the installed application's `ImageMagick` folder, verifies that `magick.exe` exists, and Clinic Suite uses that packaged executable for JPG/JPEG/PNG-to-PDF conversion. The SHA-256 verification is performed before the installer payload is created.
